@@ -442,7 +442,7 @@
     const INF = 1e12;
     const MATE = 100000000;
     const LEARN_KEY = "xiangqi_ai_pro_learning_v3";
-    const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v3";
+    const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v5";
     const SITE_TRAINING_URL = "training-data.json";
     const MODEL_KEY = "xiangqi_ai_policy_value_model_v1";
 
@@ -495,10 +495,10 @@
     };
 
     const AI_LEVELS = {
-      1: { depth: 4, timeMs: 900, maxQuiet: 22, randomNoise: 18 },
-      2: { depth: 6, timeMs: 2800, maxQuiet: 36, randomNoise: 2 },
-      3: { depth: 7, timeMs: 4800, maxQuiet: 46, randomNoise: 0 },
-      4: { depth: 8, timeMs: 8200, maxQuiet: 58, randomNoise: 0 }
+      1: { depth: 4, timeMs: 900, maxQuiet: 22, randomNoise: 18, mctsMs: 0, mctsSims: 0 },
+      2: { depth: 6, timeMs: 2600, maxQuiet: 36, randomNoise: 2, mctsMs: 360, mctsSims: 26 },
+      3: { depth: 7, timeMs: 4300, maxQuiet: 46, randomNoise: 0, mctsMs: 720, mctsSims: 52 },
+      4: { depth: 8, timeMs: 7200, maxQuiet: 58, randomNoise: 0, mctsMs: 1150, mctsSims: 86 }
     };
 
     let board = createInitialBoard();
@@ -1121,7 +1121,8 @@
       score -= landingSquareRisk(next, move.to.r, move.to.c, color) * 2.2;
       score -= exposedMajorPieceRisk(b, next, color) * 0.9;
       score -= severeBlunderScore(b, move, color) * 2.8;
-      score += masterStyleMoveBonus(b, move, color) * 120;
+      score += masterStyleMoveBonus(b, move, color) * 140;
+      score += masterDefenseBonus(b, move, color) * 1.4;
 
       if (moveRecords.length < 12) {
         if (p.type === "r" && !target) score -= 180;
@@ -1154,6 +1155,195 @@
       return false;
     }
 
+
+    function chooseAlphaZeroStyleMove(b, color, moves, profile) {
+      const budgetMs = profile.mctsMs || 0;
+      const maxSims = profile.mctsSims || 0;
+      if (!budgetMs || !maxSims || moves.length < 2) return null;
+
+      const rootKey = learningKey(b, color);
+      const deadline = performance.now() + budgetMs;
+      const children = buildMctsRootChildren(b, color, moves);
+      if (!children.length) return null;
+
+      let totalVisits = children.reduce((sum, child) => sum + child.n, 0) || 1;
+      let sims = 0;
+
+      while (sims < maxSims && performance.now() < deadline) {
+        const selected = selectMctsChild(children, totalVisits);
+        const next = selected.board || (selected.board = applyMoveToClone(b, selected.move));
+        const value = alphaRolloutValue(next, opposite(color), color, profile.depth >= 8 ? 3 : 2);
+        selected.n += 1;
+        selected.w += value;
+        selected.q = selected.w / selected.n;
+        totalVisits += 1;
+        sims += 1;
+      }
+
+      children.sort((a, z) => {
+        if (z.n !== a.n) return z.n - a.n;
+        return z.q - a.q;
+      });
+
+      if (totalVisits >= 12) distillMctsPolicy(rootKey, children, totalVisits);
+
+      const best = children[0];
+      if (!best) return null;
+
+      // 避免 MCTS 因模型先验误选危险招。
+      if (isObviousBlunder(b, best.move, color) || allowsImmediateWin(b, best.move, color)) {
+        const fallback = children.find(ch => !isObviousBlunder(b, ch.move, color) && !allowsImmediateWin(b, ch.move, color));
+        return fallback ? fallback.move : null;
+      }
+
+      return best.move;
+    }
+
+    function buildMctsRootChildren(b, color, moves) {
+      const raw = [];
+      let maxPrior = -INF;
+
+      for (const move of moves) {
+        if (allowsImmediateWin(b, move, color)) continue;
+        const priorScore = alphaPolicyPriorScore(b, move, color);
+        if (!Number.isFinite(priorScore)) continue;
+        maxPrior = Math.max(maxPrior, priorScore);
+        raw.push({ move, priorScore });
+      }
+
+      if (!raw.length) return [];
+
+      let sum = 0;
+      const children = raw.map(item => {
+        const p = Math.exp(Math.max(-6, Math.min(6, item.priorScore - maxPrior)));
+        sum += p;
+        return {
+          move: item.move,
+          p,
+          n: 1,
+          w: 0,
+          q: 0,
+          board: null
+        };
+      });
+
+      for (const child of children) {
+        child.p = child.p / sum;
+        // 先用价值网络给一个虚拟访问，类似 AlphaZero 的 value prior。
+        const next = applyMoveToClone(b, child.move);
+        const v = alphaLeafValue(next, opposite(color), color);
+        child.w = v;
+        child.q = v;
+        child.board = next;
+      }
+
+      return children;
+    }
+
+    function selectMctsChild(children, totalVisits) {
+      const cPuct = 1.35;
+      const sqrtTotal = Math.sqrt(Math.max(1, totalVisits));
+      let best = children[0];
+      let bestScore = -INF;
+
+      for (const child of children) {
+        const u = cPuct * child.p * sqrtTotal / (1 + child.n);
+        const score = child.q + u;
+        if (score > bestScore) {
+          bestScore = score;
+          best = child;
+        }
+      }
+
+      return best;
+    }
+
+    function alphaPolicyPriorScore(b, move, color) {
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      if (!p) return -INF;
+
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+      let score = 0;
+
+      // 这部分相当于 policy network 的手工特征先验。
+      score += modelPolicyPrior(b, move, color) * 2.4;
+      score += masterStyleMoveBonus(b, move, color) * 1.4;
+      score += clampFeature(masterDefenseBonus(b, move, color) / 900) * 1.2;
+      score += getLearnScoreForMove(b, color, move) / 7;
+
+      if (target) score += Math.max(-1.2, Math.min(1.6, captureStaticGain(b, move, color) / 700));
+      if (isInCheck(next, enemy)) score += 0.9;
+      if (createsBigThreat(next, move.to.r, move.to.c, color)) score += 0.55;
+
+      const risk = landingSquareRisk(next, move.to.r, move.to.c, color);
+      score -= Math.min(2.5, risk / 520);
+
+      const exposed = exposedMajorPieceRisk(b, next, color);
+      score -= Math.min(2.2, exposed / 650);
+
+      if (p.type === "r" && moveRecords.length < 10 && !target) score -= 0.55;
+      if ((p.type === "n" || p.type === "c") && moveRecords.length < 10) score += 0.25;
+
+      return score;
+    }
+
+    function alphaRolloutValue(b, sideToMove, rootColor, depth) {
+      const legal = generateAllLegalMoves(b, sideToMove);
+      if (!legal.length) return sideToMove === rootColor ? -1 : 1;
+
+      const win = findImmediateWinMove(b, sideToMove, legal);
+      if (win) return sideToMove === rootColor ? 1 : -1;
+
+      if (depth <= 0) return alphaLeafValue(b, sideToMove, rootColor);
+
+      const candidates = legal
+        .map(move => ({ move, score: alphaPolicyPriorScore(b, move, sideToMove) }))
+        .sort((a, z) => z.score - a.score)
+        .slice(0, sideToMove === rootColor ? 5 : 6);
+
+      if (sideToMove === rootColor) {
+        let best = -1;
+        for (const item of candidates) {
+          const next = applyMoveToClone(b, item.move);
+          best = Math.max(best, alphaRolloutValue(next, opposite(sideToMove), rootColor, depth - 1));
+        }
+        return best;
+      } else {
+        let worst = 1;
+        for (const item of candidates) {
+          const next = applyMoveToClone(b, item.move);
+          worst = Math.min(worst, alphaRolloutValue(next, opposite(sideToMove), rootColor, depth - 1));
+        }
+        return worst;
+      }
+    }
+
+    function alphaLeafValue(b, sideToMove, rootColor) {
+      // value network：把传统评估和可学习模型合成 [-1,1]。
+      const staticEval = evaluateRelative(b, rootColor) / 2300;
+      const modelEval = predictFromFeatures(extractModelFeatures(b, rootColor)) * 0.85;
+      const threat = strongestTacticalThreat(b, rootColor).score - strongestTacticalThreat(b, opposite(rootColor)).score;
+      const threatEval = Math.max(-1, Math.min(1, threat / 1800)) * 0.45;
+      return Math.max(-1, Math.min(1, Math.tanh(staticEval + modelEval + threatEval)));
+    }
+
+    function distillMctsPolicy(rootKey, children, totalVisits) {
+      // 模拟 AlphaZero 的“搜索结果反哺策略网络”：把 MCTS 访问多的走法轻微写入经验表。
+      if (!rootKey || !children.length || totalVisits < 12) return;
+      if (!learnBook[rootKey]) learnBook[rootKey] = {};
+
+      const top = children.slice(0, 4);
+      for (const child of top) {
+        const prob = child.n / totalVisits;
+        if (prob <= 0.03) continue;
+        const key = moveKey(child.move);
+        learnBook[rootKey][key] = (learnBook[rootKey][key] || 0) + prob * 0.35;
+        learnBook[rootKey][key] = Math.max(-40, Math.min(40, learnBook[rootKey][key]));
+      }
+    }
+
     function chooseAiMove(b, aiColor, difficulty) {
       let moves = generateAllLegalMoves(b, aiColor);
       if (moves.length === 0) return null;
@@ -1169,6 +1359,7 @@
 
       // 更严格的安全闸门：优先保留不会被对方白吃大子/一步杀的招。
       moves = filterSevereBlunders(b, moves, aiColor);
+      moves = masterCandidateGate(b, moves, aiColor);
 
       // 再过滤“我走完后，对方下一步就能杀”的招，防止漏防一步杀。
       const notAllowMate = moves.filter(m => !allowsImmediateWin(b, m, aiColor));
@@ -1193,7 +1384,12 @@
       nodes = 0;
       currentPvMove = null;
 
-      let bestMove = orderMoves(b, moves, aiColor, aiColor, 0, null)[0];
+      // AlphaZero-like root MCTS: 先用 policy/value 做一次根节点搜索，
+      // 再把结果作为 Alpha-Beta 的主变提示，减少低级漏招并更像“大局观”选点。
+      const mctsHint = difficulty >= 2 ? chooseAlphaZeroStyleMove(b, aiColor, moves, profile) : null;
+      if (mctsHint) currentPvMove = mctsHint;
+
+      let bestMove = mctsHint || orderMoves(b, moves, aiColor, aiColor, 0, null)[0];
       let bestScore = -INF;
 
       for (let depth = 1; depth <= profile.depth; depth++) {
@@ -1245,9 +1441,9 @@
         return good[Math.floor(Math.random() * good.length)];
       }
 
-      if (isObviousBlunder(b, bestMove, aiColor)) {
+      if (isObviousBlunder(b, bestMove, aiColor) || allowsImmediateWin(b, bestMove, aiColor)) {
         const fallback = orderMoves(b, moves, aiColor, aiColor, 0, bestMove)
-          .find(m => !isObviousBlunder(b, m, aiColor));
+          .find(m => !isObviousBlunder(b, m, aiColor) && !allowsImmediateWin(b, m, aiColor));
         if (fallback) bestMove = fallback;
       }
 
@@ -1832,7 +2028,10 @@
           pawn: 0.10,
           line: 0.10,
           center: 0.05,
-          phase: 0.02
+          phase: 0.02,
+          prophylaxis: 0.16,
+          coordination: 0.12,
+          initiative: 0.13
         },
         policy: {
           capture: 0.22,
@@ -1841,7 +2040,9 @@
           safe: 0.20,
           develop: 0.10,
           center: 0.08,
-          pawnAdvance: 0.05
+          pawnAdvance: 0.05,
+          prophylaxis: 0.16,
+          coordination: 0.12
         }
       };
     }
@@ -1879,6 +2080,9 @@
       const pawn = pawnFeature(b, color) - pawnFeature(b, enemy);
       const line = lineFeature(b, color) - lineFeature(b, enemy);
       const center = centerControlFeature(b, color) - centerControlFeature(b, enemy);
+      const prophylaxis = prophylaxisFeature(b, color) - prophylaxisFeature(b, enemy);
+      const coordination = coordinationFeature(b, color) - coordinationFeature(b, enemy);
+      const initiative = initiativeFeature(b, color) - initiativeFeature(b, enemy);
 
       return {
         material: clampFeature(material / 2200),
@@ -1889,7 +2093,10 @@
         pawn: clampFeature(pawn / 360),
         line: clampFeature(line / 450),
         center: clampFeature(center / 120),
-        phase: clampFeature((phase - 0.5) * 2)
+        phase: clampFeature((phase - 0.5) * 2),
+        prophylaxis: clampFeature(prophylaxis / 900),
+        coordination: clampFeature(coordination / 520),
+        initiative: clampFeature(initiative / 650)
       };
     }
 
@@ -1978,6 +2185,64 @@
       return score;
     }
 
+
+    function prophylaxisFeature(b, color) {
+      // 大师思路之一：先看对手最强威胁，能提前化解就很重要。
+      const enemy = opposite(color);
+      const enemyThreat = strongestTacticalThreat(b, enemy);
+      const ownThreat = strongestTacticalThreat(b, color);
+      return ownThreat.score * 0.55 - enemyThreat.score;
+    }
+
+    function coordinationFeature(b, color) {
+      // 子力协同：大子互相保护、集中控制中路和九宫附近。
+      let score = 0;
+      const enemyKing = findKing(b, opposite(color));
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color) continue;
+
+          const defended = isSquareAttacked(b, r, c, color, true);
+          if (defended && ["r", "c", "n"].includes(p.type)) score += 42;
+          if (!defended && ["r", "c", "n"].includes(p.type)) score -= 35;
+
+          const moves = getPseudoMoves(b, r, c).length;
+          if (p.type === "n" && moves >= 5) score += 28;
+          if (p.type === "r" && moves >= 9) score += 36;
+          if (p.type === "c" && moves >= 8) score += 26;
+
+          if (enemyKing && ["r", "c", "n", "p"].includes(p.type)) {
+            const dist = Math.abs(r - enemyKing.r) + Math.abs(c - enemyKing.c);
+            if (dist <= 5) score += 34;
+          }
+        }
+      }
+
+      // 双车炮马围绕中肋道配合。
+      for (const c of [3, 4, 5]) {
+        let major = 0;
+        for (let r = 0; r < ROWS; r++) {
+          const p = b[r][c];
+          if (p && p.color === color && ["r", "c", "n"].includes(p.type)) major++;
+        }
+        if (major >= 2) score += 55;
+      }
+
+      return score;
+    }
+
+    function initiativeFeature(b, color) {
+      // 主动权：将军、威胁大子、限制对方行动力。
+      const enemy = opposite(color);
+      let score = 0;
+      if (isInCheck(b, enemy)) score += 120;
+      score += strongestTacticalThreat(b, color).score * 0.7;
+      score -= sideMobilityScore(b, enemy) * 0.8;
+      return score;
+    }
+
     function modelValueBonus(b, color) {
       const f = extractModelFeatures(b, color);
       let value = 0;
@@ -2006,6 +2271,9 @@
       if (["n", "c"].includes(p.type) && !hasCrossedRiver(color, move.from.r)) score += pol.develop || 0;
       if ([3, 4, 5].includes(move.to.c)) score += pol.center || 0;
       if (p.type === "p" && hasCrossedRiver(color, move.to.r)) score += pol.pawnAdvance || 0;
+
+      score += (pol.prophylaxis || 0) * clampFeature(masterDefenseBonus(b, move, color) / 900);
+      score += (pol.coordination || 0) * masterStyleMoveBonus(b, move, color);
 
       return score;
     }
@@ -2076,6 +2344,77 @@
 
 
 
+
+
+    function strongestTacticalThreat(b, attackerColor) {
+      const moves = generateAllLegalMoves(b, attackerColor);
+      let best = { score: 0, move: null, target: null, kind: "" };
+      const defender = opposite(attackerColor);
+
+      for (const move of moves) {
+        const target = b[move.to.r][move.to.c];
+        const next = applyMoveToClone(b, move);
+        let score = 0;
+        let kind = "";
+
+        if (target) {
+          score += Math.max(0, captureStaticGain(b, move, attackerColor));
+          if (["r", "c", "n"].includes(target.type)) score += 260;
+          kind = "capture";
+        }
+
+        if (isInCheck(next, defender)) {
+          const replies = generateAllLegalMoves(next, defender).length;
+          score += replies <= 1 ? 1500 : 420;
+          kind = "check";
+        }
+
+        if (createsBigThreat(next, move.to.r, move.to.c, attackerColor)) {
+          score += 360;
+          kind = kind || "threat";
+        }
+
+        if (score > best.score) best = { score, move, target, kind };
+      }
+
+      return best;
+    }
+
+    function masterDefenseBonus(b, move, color) {
+      // 大师常见思路：有威胁先解威胁，而不是只看自己能走什么。
+      const enemy = opposite(color);
+      const before = strongestTacticalThreat(b, enemy).score;
+      if (before < 260) return 0;
+
+      const next = applyMoveToClone(b, move);
+      const after = strongestTacticalThreat(next, enemy).score;
+      const reduced = before - after;
+
+      let bonus = Math.max(-500, reduced);
+      if (after >= 1000) bonus -= 700;       // 仍有强杀/强吃，重罚
+      if (reduced > 500) bonus += 260;       // 成功化解强威胁，奖励
+
+      return bonus;
+    }
+
+    function masterCandidateGate(b, moves, color) {
+      // 根节点用：把不符合大师思路的危险招先剔除，减少搜索被烂招干扰。
+      if (!moves || moves.length <= 1) return moves;
+
+      const enemyThreat = strongestTacticalThreat(b, opposite(color)).score;
+      const scored = moves.map(move => {
+        const next = applyMoveToClone(b, move);
+        const risk = severeBlunderScore(b, move, color);
+        const defense = enemyThreat > 260 ? masterDefenseBonus(b, move, color) : 0;
+        const style = masterStyleMoveBonus(b, move, color) * 300;
+        const tactical = fastMoveScore(b, move, color) * 0.15;
+        return { move, score: defense + style + tactical - risk * 1.2 };
+      }).sort((a, z) => z.score - a.score);
+
+      // 保留前若干候选，既能减少低级错误，也能让搜索更集中。
+      const keep = Math.max(6, Math.min(18, Math.ceil(scored.length * 0.55)));
+      return scored.slice(0, keep).map(x => x.move);
+    }
 
     function filterSevereBlunders(b, moves, color) {
       if (!moves || moves.length <= 1) return moves;
@@ -2476,6 +2815,16 @@
       if (risk <= 0) bonus += 0.16;
       else bonus -= Math.min(0.65, risk / 900);
 
+      // 同一棋子开局连续移动通常不是大师风格，除非是战术或吃子。
+      if (turnNo < 12 && lastMove && lastMove.piece && lastMove.piece.color === color) {
+        if (lastMove.to.r === move.from.r && lastMove.to.c === move.from.c && !target) bonus -= 0.24;
+      }
+
+      // 大子去边角且无战术目的，扣分。
+      if (["r", "c", "n"].includes(p.type) && !target && (move.to.c === 0 || move.to.c === 8)) {
+        bonus -= 0.14;
+      }
+
       // 好的吃子必须交换后不亏。
       if (target) {
         const see = staticExchangeEval(b, move, color);
@@ -2715,6 +3064,12 @@
       let moves = generateAllLegalMoves(b, side);
       if (!moves.length) return null;
       moves = filterObviousBlunders(b, moves, side);
+      moves = masterCandidateGate(b, moves, side);
+
+      if (ply < 60 && Math.random() < 0.12) {
+        const teacher = chooseAlphaZeroStyleMove(b, side, moves, { depth: 5, mctsMs: 55, mctsSims: 8 });
+        if (teacher && !isObviousBlunder(b, teacher, side)) return teacher;
+      }
 
       const learned = chooseLearnedMove(b, side, moves);
       if (learned && Math.random() < 0.22) return learned;
@@ -3181,7 +3536,8 @@
         if (see < -120) score += see * 5.0;
       }
 
-      score += masterStyleMoveBonus(b, move, color) * 160;
+      score += masterStyleMoveBonus(b, move, color) * 180;
+      if (ply === 0) score += masterDefenseBonus(b, move, color) * 2.6;
 
       if (ply === 0) {
         if (findImmediateWinMove(b, color, [move])) score += MATE / 10;
