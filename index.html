@@ -1,0 +1,1986 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>中国象棋 AI Pro Max</title>
+  <style>
+    :root {
+      --line: #5b2f12;
+      --red: #c52222;
+      --black: #151515;
+      --hint: rgba(46, 160, 67, 0.35);
+      --select: rgba(255, 214, 10, 0.78);
+      --last: rgba(40, 112, 255, 0.24);
+      --panel: rgba(255, 248, 232, 0.92);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at top, #fff3d6, #d9a35a 70%);
+      font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      color: #29170a;
+    }
+
+    .app {
+      width: min(98vw, 1040px);
+      display: grid;
+      grid-template-columns: minmax(320px, 660px) minmax(270px, 1fr);
+      gap: 18px;
+      align-items: start;
+      padding: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 2px solid rgba(91, 47, 18, 0.28);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 18px 45px rgba(91, 47, 18, 0.25);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 26px;
+    }
+
+    .status {
+      min-height: 72px;
+      margin: 8px 0 14px;
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.67);
+      line-height: 1.55;
+      font-weight: 700;
+    }
+
+    .red { color: var(--red); }
+    .black { color: var(--black); }
+
+    .buttons, .settings {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    button, select {
+      border: none;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 700;
+      box-shadow: 0 6px 14px rgba(91, 47, 18, 0.18);
+    }
+
+    button {
+      cursor: pointer;
+      color: #fff;
+      background: #7b3f16;
+    }
+
+    button.secondary { background: #9b6a2d; }
+    button.danger { background: #a73524; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+
+    select {
+      background: #fff8e8;
+      color: #29170a;
+      border: 1px solid rgba(91, 47, 18, 0.28);
+      max-width: 190px;
+    }
+
+    .label {
+      display: grid;
+      gap: 4px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .tips {
+      margin: 0;
+      padding-left: 18px;
+      line-height: 1.8;
+      font-size: 14px;
+    }
+
+    .meter {
+      display: grid;
+      gap: 6px;
+      margin: 10px 0 12px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .meter-bar {
+      height: 10px;
+      background: rgba(91, 47, 18, 0.16);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .meter-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #7b3f16, #d08a38);
+      transition: width 0.15s linear;
+    }
+
+    .board-shell {
+      position: relative;
+      width: min(94vw, 650px);
+      aspect-ratio: 9 / 10;
+      margin: 0 auto;
+      padding: 5.8%;
+      background: linear-gradient(135deg, #eab65c, #ffd78d 45%, #d8953b);
+      border: 5px solid #6f3b14;
+      border-radius: 16px;
+      box-shadow: inset 0 0 18px rgba(91, 47, 18, 0.32), 0 18px 45px rgba(91, 47, 18, 0.35);
+      user-select: none;
+    }
+
+    .board {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    .line {
+      position: absolute;
+      background: var(--line);
+      opacity: 0.9;
+    }
+
+    .h-line { height: 2px; left: 0; right: 0; }
+    .v-line { width: 2px; top: 0; bottom: 0; }
+    .v-line.river-gap { bottom: auto; }
+    .v-line.river-gap.bottom { top: auto; }
+
+    .diag {
+      position: absolute;
+      height: 2px;
+      background: var(--line);
+      transform-origin: left center;
+      opacity: 0.9;
+    }
+
+    .river {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 44.5%;
+      height: 11%;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      font-size: clamp(22px, 5vw, 44px);
+      font-family: "KaiTi", "STKaiti", serif;
+      letter-spacing: 0.45em;
+      color: rgba(91, 47, 18, 0.72);
+      pointer-events: none;
+    }
+
+    .cell {
+      position: absolute;
+      width: 9.8%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+    }
+
+    .cell.hint::after {
+      content: "";
+      width: 42%;
+      height: 42%;
+      border-radius: 50%;
+      background: var(--hint);
+      border: 1px solid rgba(12, 90, 25, 0.6);
+    }
+
+    .cell.capture::after {
+      content: "";
+      width: 80%;
+      height: 80%;
+      border-radius: 50%;
+      border: 4px solid rgba(46, 160, 67, 0.65);
+    }
+
+    .cell.last { background: var(--last); }
+
+    .piece {
+      position: absolute;
+      width: 9.6%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      display: grid;
+      place-items: center;
+      z-index: 3;
+      font-family: "KaiTi", "STKaiti", serif;
+      font-weight: 900;
+      font-size: clamp(20px, 4.6vw, 38px);
+      background: radial-gradient(circle at 35% 28%, #fff8df, #f3d08b 58%, #b87028);
+      border: 3px solid #7b3f16;
+      box-shadow: inset 0 0 5px rgba(255,255,255,0.75), 0 5px 10px rgba(55, 22, 5, 0.36);
+      cursor: pointer;
+      transition: transform 0.08s ease, filter 0.08s ease;
+    }
+
+    .piece.red { color: var(--red); }
+    .piece.black { color: var(--black); }
+    .piece.selected {
+      outline: 5px solid var(--select);
+      transform: translate(-50%, -50%) scale(1.08);
+      filter: brightness(1.08);
+    }
+
+    .move-list {
+      margin-top: 12px;
+      max-height: 230px;
+      overflow: auto;
+      padding-right: 6px;
+      font-size: 13px;
+      line-height: 1.7;
+      background: rgba(255,255,255,0.45);
+      border-radius: 12px;
+    }
+
+    .move-list div {
+      padding: 4px 8px;
+      border-bottom: 1px dashed rgba(91, 47, 18, 0.22);
+    }
+
+    .small {
+      font-size: 12px;
+      opacity: 0.82;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 810px) {
+      .app { grid-template-columns: 1fr; }
+      .panel { order: 2; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="board-shell" aria-label="中国象棋棋盘">
+      <div id="board" class="board"></div>
+    </section>
+
+    <aside class="panel">
+      <h1>中国象棋 AI Pro Max</h1>
+      <div id="status" class="status"></div>
+
+      <div class="settings">
+        <label class="label">模式
+          <select id="mode">
+            <option value="human-red">人机：我执红</option>
+            <option value="human-black">人机：我执黑</option>
+            <option value="two-player">双人对弈</option>
+            <option value="ai-vs-ai">AI 自战演示</option>
+          </select>
+        </label>
+
+        <label class="label">AI 难度
+          <select id="difficulty">
+            <option value="1">简单：3 层</option>
+            <option value="2">普通：6 层</option>
+            <option value="3" selected>困难：8 层限时</option>
+            <option value="4">大师：10 层限时</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="buttons">
+        <button id="restart">重新开始</button>
+        <button id="flip" class="secondary">翻转棋盘</button>
+        <button id="undo" class="secondary">悔一步</button>
+        <button id="train">训练 20 局</button>
+        <button id="trainDeep" class="secondary">深度训练 100 局</button>
+        <button id="importBtn" class="secondary">导入棋谱训练</button>
+        <input id="importFile" type="file" accept=".txt,.csv,.json" style="display:none" />
+        <button id="clearLearn" class="danger">清空训练</button>
+      </div>
+
+      <div class="meter">
+        <div id="trainText">本地训练：0 条经验</div>
+        <div class="meter-bar"><div id="trainFill" class="meter-fill"></div></div>
+      </div>
+
+      <ul class="tips">
+        <li>AI 使用强化开局库、PVS/Alpha-Beta、置换表、静态搜索、杀棋延伸。</li>
+        <li>“深度训练 100 局”会在本机自我对弈，并把结果保存到浏览器 localStorage。</li>
+        <li>可导入坐标棋谱训练，例如：B8-E8 B1-C3 H10-G8。</li>
+      </ul>
+
+      <p class="small">
+        注意：这是浏览器单文件 AI，不等于专业象棋引擎。真正大师级通常需要百万级棋谱、残局库、UCCI 引擎或神经网络评估。
+      </p>
+
+      <div id="moves" class="move-list"></div>
+    </aside>
+  </main>
+
+  <script>
+    const ROWS = 10;
+    const COLS = 9;
+    const INF = 1e12;
+    const MATE = 100000000;
+    const LEARN_KEY = "xiangqi_ai_pro_learning_v3";
+    const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v3";
+
+    const boardEl = document.getElementById("board");
+    const statusEl = document.getElementById("status");
+    const movesEl = document.getElementById("moves");
+    const restartBtn = document.getElementById("restart");
+    const flipBtn = document.getElementById("flip");
+    const undoBtn = document.getElementById("undo");
+    const trainBtn = document.getElementById("train");
+    const trainDeepBtn = document.getElementById("trainDeep");
+    const importBtn = document.getElementById("importBtn");
+    const importFileEl = document.getElementById("importFile");
+    const clearLearnBtn = document.getElementById("clearLearn");
+    const modeEl = document.getElementById("mode");
+    const difficultyEl = document.getElementById("difficulty");
+    const trainTextEl = document.getElementById("trainText");
+    const trainFillEl = document.getElementById("trainFill");
+
+    const pieceText = {
+      red: { k: "帥", a: "仕", b: "相", n: "馬", r: "車", c: "炮", p: "兵" },
+      black: { k: "將", a: "士", b: "象", n: "馬", r: "車", c: "炮", p: "卒" }
+    };
+
+    const pieceName = { k: "将", a: "士", b: "象", n: "马", r: "车", c: "炮", p: "兵" };
+
+    const baseValue = {
+      k: 200000,
+      r: 1000,
+      c: 520,
+      n: 480,
+      b: 250,
+      a: 250,
+      p: 120
+    };
+
+    const mobilityWeight = {
+      k: 0,
+      r: 5,
+      c: 4,
+      n: 6,
+      b: 1,
+      a: 1,
+      p: 3
+    };
+
+    const AI_LEVELS = {
+      1: { depth: 3, timeMs: 750, maxQuiet: 24, randomNoise: 35 },
+      2: { depth: 6, timeMs: 3600, maxQuiet: 42, randomNoise: 5 },
+      3: { depth: 8, timeMs: 7800, maxQuiet: 58, randomNoise: 1 },
+      4: { depth: 10, timeMs: 15500, maxQuiet: 76, randomNoise: 0 }
+    };
+
+    let board = createInitialBoard();
+    let turn = "red";
+    let selected = null;
+    let legalTargets = [];
+    let flipped = false;
+    let gameOver = false;
+    let lastMove = null;
+    let history = [];
+    let moveRecords = [];
+    let positionHistory = [];
+    let aiThinking = false;
+    let training = false;
+
+    let learnBook = loadLearnBook();
+    let tt = new Map();
+    let killerMoves = Array.from({ length: 96 }, () => []);
+    let historyHeuristic = new Map();
+    let searchDeadline = 0;
+    let searchStopped = false;
+    let nodes = 0;
+    let currentPvMove = null;
+
+    function createInitialBoard() {
+      const b = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+      const put = (r, c, color, type) => b[r][c] = { color, type };
+
+      ["r", "n", "b", "a", "k", "a", "b", "n", "r"].forEach((type, c) => put(0, c, "black", type));
+      put(2, 1, "black", "c"); put(2, 7, "black", "c");
+      [0, 2, 4, 6, 8].forEach(c => put(3, c, "black", "p"));
+
+      [0, 2, 4, 6, 8].forEach(c => put(6, c, "red", "p"));
+      put(7, 1, "red", "c"); put(7, 7, "red", "c");
+      ["r", "n", "b", "a", "k", "a", "b", "n", "r"].forEach((type, c) => put(9, c, "red", type));
+
+      return b;
+    }
+
+    function render() {
+      boardEl.innerHTML = "";
+      drawBoardLines();
+      drawRiverText();
+      drawCells();
+      drawPieces();
+      updateStatus();
+      renderMoves();
+      updateTrainingInfo();
+    }
+
+    function drawBoardLines() {
+      for (let r = 0; r < ROWS; r++) {
+        const line = document.createElement("div");
+        line.className = "line h-line";
+        line.style.top = `${rowY(r)}%`;
+        boardEl.appendChild(line);
+      }
+
+      for (let c = 0; c < COLS; c++) {
+        if (c === 0 || c === COLS - 1) {
+          const line = document.createElement("div");
+          line.className = "line v-line";
+          line.style.left = `${colX(c)}%`;
+          boardEl.appendChild(line);
+        } else {
+          const top = document.createElement("div");
+          top.className = "line v-line river-gap";
+          top.style.left = `${colX(c)}%`;
+          top.style.top = `${rowY(0)}%`;
+          top.style.height = `${rowY(4) - rowY(0)}%`;
+          boardEl.appendChild(top);
+
+          const bottom = document.createElement("div");
+          bottom.className = "line v-line river-gap bottom";
+          bottom.style.left = `${colX(c)}%`;
+          bottom.style.top = `${rowY(5)}%`;
+          bottom.style.height = `${rowY(9) - rowY(5)}%`;
+          boardEl.appendChild(bottom);
+        }
+      }
+
+      drawPalace(0);
+      drawPalace(7);
+    }
+
+    function drawPalace(startRow) {
+      drawDiag(startRow, 3, startRow + 2, 5);
+      drawDiag(startRow, 5, startRow + 2, 3);
+    }
+
+    function drawDiag(r1, c1, r2, c2) {
+      const x1 = colX(c1), y1 = rowY(r1);
+      const x2 = colX(c2), y2 = rowY(r2);
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      const line = document.createElement("div");
+      line.className = "diag";
+      line.style.left = `${x1}%`;
+      line.style.top = `${y1}%`;
+      line.style.width = `${len}%`;
+      line.style.transform = `rotate(${angle}deg)`;
+      boardEl.appendChild(line);
+    }
+
+    function drawRiverText() {
+      const river = document.createElement("div");
+      river.className = "river";
+      river.textContent = flipped ? "界 楚　　　河 漢" : "楚 河　　　漢 界";
+      boardEl.appendChild(river);
+    }
+
+    function drawCells() {
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const { vr, vc } = toView(r, c);
+          const cell = document.createElement("div");
+          cell.className = "cell";
+          cell.style.left = `${colX(vc)}%`;
+          cell.style.top = `${rowY(vr)}%`;
+
+          if (lastMove && ((lastMove.from.r === r && lastMove.from.c === c) || (lastMove.to.r === r && lastMove.to.c === c))) {
+            cell.classList.add("last");
+          }
+
+          if (legalTargets.some(m => m.r === r && m.c === c)) {
+            cell.classList.add(board[r][c] ? "capture" : "hint");
+          }
+
+          cell.addEventListener("click", () => onSquareClick(r, c));
+          boardEl.appendChild(cell);
+        }
+      }
+    }
+
+    function drawPieces() {
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = board[r][c];
+          if (!p) continue;
+          const { vr, vc } = toView(r, c);
+          const piece = document.createElement("div");
+          piece.className = `piece ${p.color}`;
+          piece.textContent = pieceText[p.color][p.type];
+          piece.style.left = `${colX(vc)}%`;
+          piece.style.top = `${rowY(vr)}%`;
+          if (selected && selected.r === r && selected.c === c) piece.classList.add("selected");
+          piece.addEventListener("click", event => {
+            event.stopPropagation();
+            onSquareClick(r, c);
+          });
+          boardEl.appendChild(piece);
+        }
+      }
+    }
+
+    function rowY(r) { return r * 100 / (ROWS - 1); }
+    function colX(c) { return c * 100 / (COLS - 1); }
+    function toView(r, c) { return flipped ? { vr: ROWS - 1 - r, vc: COLS - 1 - c } : { vr: r, vc: c }; }
+
+    function getAiColor() {
+      if (modeEl.value === "two-player") return null;
+      if (modeEl.value === "ai-vs-ai") return turn;
+      return modeEl.value === "human-red" ? "black" : "red";
+    }
+
+    function isAiTurn() {
+      if (modeEl.value === "ai-vs-ai") return !gameOver;
+      return getAiColor() === turn && !gameOver;
+    }
+
+    function onSquareClick(r, c) {
+      if (gameOver || aiThinking || training || isAiTurn()) return;
+      const piece = board[r][c];
+
+      if (selected && legalTargets.some(m => m.r === r && m.c === c)) {
+        makeRealMove({ from: selected, to: { r, c } });
+        return;
+      }
+
+      if (piece && piece.color === turn) {
+        selected = { r, c };
+        legalTargets = getLegalMoves(board, r, c);
+      } else {
+        selected = null;
+        legalTargets = [];
+      }
+      render();
+    }
+
+    function makeRealMove(move) {
+      const fr = move.from.r, fc = move.from.c;
+      const tr = move.to.r, tc = move.to.c;
+      const piece = board[fr][fc];
+      const captured = board[tr][tc];
+      if (!piece) return;
+
+      history.push({ board: cloneBoard(board), turn, lastMove, gameOver, records: [...moveRecords], pos: [...positionHistory] });
+      positionHistory.push({ key: learningKey(board, turn), move: moveKey(move), color: piece.color });
+
+      board[tr][tc] = piece;
+      board[fr][fc] = null;
+      lastMove = { from: { r: fr, c: fc }, to: { r: tr, c: tc }, piece, captured };
+      selected = null;
+      legalTargets = [];
+
+      const recordText = `${piece.color === "red" ? "红" : "黑"}${pieceName[piece.type]} ${coordText(fr, fc)} → ${coordText(tr, tc)}${captured ? ` 吃${pieceName[captured.type]}` : ""}`;
+      moveRecords.push(recordText);
+
+      if (captured && captured.type === "k") {
+        gameOver = true;
+        learnFromResult(piece.color);
+        render();
+        return;
+      }
+
+      turn = opposite(turn);
+      if (!hasAnyLegalMove(board, turn)) {
+        gameOver = true;
+        const winner = isInCheck(board, turn) ? opposite(turn) : opposite(turn);
+        learnFromResult(winner);
+      }
+
+      render();
+      scheduleAiMove();
+    }
+
+    function scheduleAiMove() {
+      if (!isAiTurn()) return;
+      aiThinking = true;
+      selected = null;
+      legalTargets = [];
+      render();
+
+      setTimeout(() => {
+        const aiColor = turn;
+        const difficulty = Number(difficultyEl.value);
+        const move = chooseAiMove(board, aiColor, difficulty);
+        aiThinking = false;
+        if (move) makeRealMove(move);
+        else render();
+      }, modeEl.value === "ai-vs-ai" ? 80 : 180);
+    }
+
+    function chooseAiMove(b, aiColor, difficulty) {
+      const moves = generateAllLegalMoves(b, aiColor);
+      if (moves.length === 0) return null;
+
+      const profile = AI_LEVELS[difficulty] || AI_LEVELS[3];
+
+      const bookMove = chooseOpeningBookMove(b, aiColor, moves);
+      if (bookMove && moveRecords.length < 10) return bookMove;
+
+      const learnedMove = chooseLearnedMove(b, aiColor, moves);
+      if (learnedMove && moveRecords.length < 20 && Math.random() < 0.75) return learnedMove;
+
+      tt.clear();
+      killerMoves = Array.from({ length: 96 }, () => []);
+      historyHeuristic.clear();
+      searchDeadline = performance.now() + profile.timeMs;
+      searchStopped = false;
+      nodes = 0;
+      currentPvMove = null;
+
+      let bestMove = orderMoves(b, moves, aiColor, aiColor, 0, null)[0];
+      let bestScore = -INF;
+
+      for (let depth = 1; depth <= profile.depth; depth++) {
+        let localBest = bestMove;
+        let localScore = -INF;
+
+        // aspiration window
+        let alpha = depth >= 4 ? bestScore - 350 : -INF;
+        let beta = depth >= 4 ? bestScore + 350 : INF;
+
+        for (let attempt = 0; attempt < 2; attempt++) {
+          localScore = -INF;
+          searchStopped = false;
+
+          const ordered = orderMoves(b, moves, aiColor, aiColor, 0, bestMove);
+          for (const move of ordered) {
+            const next = applyMoveToClone(b, move);
+            const score = -negamax(next, depth - 1, -beta, -alpha, opposite(aiColor), aiColor, 1, true, profile);
+            if (searchStopped) break;
+
+            if (score > localScore) {
+              localScore = score;
+              localBest = move;
+              if (depth === profile.depth) currentPvMove = move;
+            }
+            alpha = Math.max(alpha, localScore);
+          }
+
+          if (searchStopped) break;
+
+          if (localScore <= alpha || localScore >= beta) {
+            alpha = -INF;
+            beta = INF;
+            continue;
+          }
+          break;
+        }
+
+        if (searchStopped) break;
+        bestMove = localBest;
+        bestScore = localScore;
+
+        // 找到明显杀棋就提前走
+        if (bestScore > MATE / 2) break;
+      }
+
+      if (profile.randomNoise > 0 && Math.random() * 100 < profile.randomNoise) {
+        const good = orderMoves(b, moves, aiColor, aiColor, 0, bestMove).slice(0, Math.min(4, moves.length));
+        return good[Math.floor(Math.random() * good.length)];
+      }
+
+      console.log("AI nodes:", nodes, "score:", bestScore, "move:", moveKey(bestMove));
+      return bestMove;
+    }
+
+    function negamax(b, depth, alpha, beta, side, aiColor, ply, allowNullMove, profile) {
+      if (shouldStop()) {
+        searchStopped = true;
+        return evaluateRelative(b, side);
+      }
+
+      const sideKing = findKing(b, side);
+      const enemyKing = findKing(b, opposite(side));
+      if (!sideKing) return -MATE + ply;
+      if (!enemyKing) return MATE - ply;
+
+      const inCheck = isInCheck(b, side);
+
+      // 将军延伸：避免漏掉连续将杀
+      if (inCheck && depth < 7) depth += 1;
+
+      if (depth <= 0) return quiescence(b, alpha, beta, side, ply, 0, profile);
+
+      const originalAlpha = alpha;
+      const key = hashBoard(b, side);
+      const cached = tt.get(key);
+      if (cached && cached.depth >= depth) {
+        if (cached.flag === "exact") return cached.value;
+        if (cached.flag === "lower") alpha = Math.max(alpha, cached.value);
+        if (cached.flag === "upper") beta = Math.min(beta, cached.value);
+        if (alpha >= beta) return cached.value;
+      }
+
+      // Null Move Pruning：中盘大幅提速；残局/被将军不用
+      if (allowNullMove && depth >= 3 && !inCheck && hasMajorMaterial(b, side) && totalMaterial(b) > 3600) {
+        const reduction = depth >= 6 ? 3 : 2;
+        const score = -negamax(b, depth - 1 - reduction, -beta, -beta + 1, opposite(side), aiColor, ply + 1, false, profile);
+        if (!searchStopped && score >= beta) return score;
+      }
+
+      let moves = generateAllLegalMoves(b, side);
+      if (moves.length === 0) return inCheck ? -MATE + ply : -40;
+
+      const ttMove = cached ? cached.bestMove : null;
+      moves = orderMoves(b, moves, side, aiColor, ply, ttMove);
+
+      let bestMove = moves[0];
+      let bestScore = -INF;
+      let quietCount = 0;
+      const staticEval = evaluateRelative(b, side);
+
+      for (let i = 0; i < moves.length; i++) {
+        const move = moves[i];
+        const tactical = isTacticalMove(b, move, side);
+        const quiet = !tactical;
+
+        if (!inCheck && quiet && depth <= 2 && quietCount++ > profile.maxQuiet) continue;
+        if (!inCheck && quiet && depth <= 2 && staticEval + 180 * depth <= alpha) continue;
+
+        const next = applyMoveToClone(b, move);
+        const givesCheck = isInCheck(next, opposite(side));
+        let newDepth = depth - 1;
+        let reduced = false;
+
+        // Late Move Reduction：只减少靠后的安静招，吃子/将军/威胁不减。
+        if (!inCheck && !givesCheck && quiet && depth >= 3 && i >= 5) {
+          newDepth -= depth >= 6 && i >= 12 ? 2 : 1;
+          if (newDepth < 0) newDepth = 0;
+          reduced = true;
+        }
+
+        // 走出将军或连续将军时延伸，减少漏杀。
+        if (givesCheck && newDepth < depth) newDepth += 1;
+
+        let score;
+        if (i === 0) {
+          score = -negamax(next, newDepth, -beta, -alpha, opposite(side), aiColor, ply + 1, true, profile);
+        } else {
+          // PVS / Principal Variation Search：非首选招先用窄窗口验证。
+          score = -negamax(next, newDepth, -alpha - 1, -alpha, opposite(side), aiColor, ply + 1, true, profile);
+          if (!searchStopped && score > alpha && score < beta) {
+            score = -negamax(next, newDepth, -beta, -alpha, opposite(side), aiColor, ply + 1, true, profile);
+          }
+        }
+
+        if (!searchStopped && reduced && score > alpha) {
+          score = -negamax(next, depth - 1, -beta, -alpha, opposite(side), aiColor, ply + 1, true, profile);
+        }
+
+        if (searchStopped) break;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMove = move;
+        }
+
+        alpha = Math.max(alpha, score);
+        if (alpha >= beta) {
+          rememberCutoff(move, depth, ply, tactical);
+          break;
+        }
+      }
+
+      let flag = "exact";
+      if (bestScore <= originalAlpha) flag = "upper";
+      else if (bestScore >= beta) flag = "lower";
+
+      tt.set(key, { depth, value: bestScore, flag, bestMove });
+      return bestScore;
+    }
+
+    function quiescence(b, alpha, beta, side, ply, qDepth, profile) {
+      if (shouldStop()) {
+        searchStopped = true;
+        return evaluateRelative(b, side);
+      }
+
+      const inCheck = isInCheck(b, side);
+      const standPat = evaluateRelative(b, side);
+
+      if (!inCheck) {
+        if (standPat >= beta) return standPat;
+        alpha = Math.max(alpha, standPat);
+      }
+
+      if (qDepth >= 8 && !inCheck) return standPat;
+
+      let moves = inCheck ? generateAllLegalMoves(b, side) : generateTacticalMoves(b, side);
+      if (moves.length === 0) return inCheck ? -MATE + ply : standPat;
+
+      moves = orderMoves(b, moves, side, side, ply, null);
+
+      for (const move of moves) {
+        const next = applyMoveToClone(b, move);
+        const score = -quiescence(next, -beta, -alpha, opposite(side), ply + 1, qDepth + 1, profile);
+        if (score >= beta) return score;
+        if (score > alpha) alpha = score;
+      }
+
+      return alpha;
+    }
+
+    function shouldStop() {
+      nodes++;
+      return (nodes & 4095) === 0 && performance.now() > searchDeadline;
+    }
+
+    function evaluateRelative(b, side) {
+      return evaluateAbsolute(b, side) - evaluateAbsolute(b, opposite(side));
+    }
+
+    function evaluateAbsolute(b, color) {
+      let score = 0;
+      let advisors = 0;
+      let elephants = 0;
+      let phase = gamePhase(b);
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color) continue;
+
+          if (p.type === "a") advisors++;
+          if (p.type === "b") elephants++;
+
+          score += baseValue[p.type];
+          score += positionalBonus(b, p, r, c, phase);
+          score += getPseudoMoves(b, r, c).length * mobilityWeight[p.type];
+          score += pieceSafety(b, r, c, color);
+        }
+      }
+
+      score += kingSafety(b, color, advisors, elephants);
+      score += attackPressure(b, color);
+      score += formationBonus(b, color);
+      score += learnedPositionBonus(b, color);
+
+      if (isInCheck(b, color)) score -= 120;
+
+      return score;
+    }
+
+    function gamePhase(b) {
+      let material = 0;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (p && p.type !== "k" && p.type !== "a" && p.type !== "b" && p.type !== "p") material += baseValue[p.type];
+        }
+      }
+      return Math.max(0, Math.min(1, material / 5900));
+    }
+
+    function positionalBonus(b, p, r, c, phase) {
+      const center = 18 - Math.abs(c - 4) * 4;
+      const forward = p.color === "red" ? 9 - r : r;
+      const crossed = hasCrossedRiver(p.color, r);
+
+      switch (p.type) {
+        case "p":
+          return forward * 20 + (crossed ? 95 : 0) + center * (crossed ? 3 : 1);
+        case "n":
+          return center * 4 + forward * 4 - edgePenalty(r, c) * 18 + horseOutpostBonus(b, r, c, p.color);
+        case "c":
+          return center * 2 + 25 + cannonThreatBonus(b, r, c, p.color) + (1 - phase) * 20;
+        case "r":
+          return center + 45 + rookActivityBonus(b, r, c, p.color);
+        case "a":
+          return inPalace(r, c, p.color) ? 15 : -50;
+        case "b":
+          return 12 + elephantShapeBonus(b, r, c, p.color);
+        case "k":
+          return kingPositionBonus(p.color, r, c, phase);
+        default:
+          return 0;
+      }
+    }
+
+    function edgePenalty(r, c) {
+      let p = 0;
+      if (c === 0 || c === 8) p++;
+      if (r === 0 || r === 9) p++;
+      return p;
+    }
+
+    function horseOutpostBonus(b, r, c, color) {
+      let bonus = 0;
+      const enemy = opposite(color);
+      if (hasCrossedRiver(color, r)) bonus += 25;
+      if (!isSquareAttacked(b, r, c, enemy) || isSquareAttacked(b, r, c, color, true)) bonus += 18;
+      return bonus;
+    }
+
+    function rookActivityBonus(b, r, c, color) {
+      let bonus = 0;
+      for (const [dr, dc] of [[1,0], [-1,0], [0,1], [0,-1]]) {
+        let nr = r + dr, nc = c + dc;
+        let empty = 0;
+        while (inBounds(nr, nc) && !b[nr][nc]) {
+          empty++;
+          nr += dr;
+          nc += dc;
+        }
+        bonus += Math.min(28, empty * 4);
+        if (inBounds(nr, nc) && b[nr][nc].color !== color) bonus += Math.min(45, baseValue[b[nr][nc].type] / 20);
+      }
+      return bonus;
+    }
+
+    function cannonThreatBonus(b, r, c, color) {
+      let bonus = 0;
+      for (const [dr, dc] of [[1,0], [-1,0], [0,1], [0,-1]]) {
+        let nr = r + dr, nc = c + dc;
+        let screens = 0;
+        while (inBounds(nr, nc)) {
+          const p = b[nr][nc];
+          if (p) {
+            screens++;
+            if (screens === 2) {
+              if (p.color !== color) bonus += Math.min(90, baseValue[p.type] / 10);
+              break;
+            }
+          }
+          nr += dr;
+          nc += dc;
+        }
+      }
+      return bonus;
+    }
+
+    function elephantShapeBonus(b, r, c, color) {
+      let bonus = 0;
+      const homeRows = color === "red" ? [5, 7, 9] : [0, 2, 4];
+      if (homeRows.includes(r)) bonus += 8;
+      if (c === 2 || c === 6) bonus += 8;
+      return bonus;
+    }
+
+    function kingPositionBonus(color, r, c, phase) {
+      const homeRow = color === "red" ? 9 : 0;
+      let score = 0;
+      if (c === 4) score += 22;
+      else score -= 18;
+      if (r === homeRow) score += 24 * phase;
+      return score;
+    }
+
+    function pieceSafety(b, r, c, color) {
+      const p = b[r][c];
+      if (!p || p.type === "k") return 0;
+
+      const enemy = opposite(color);
+      const attacked = isSquareAttacked(b, r, c, enemy);
+      const defended = isSquareAttacked(b, r, c, color, true);
+
+      if (!attacked) return defended ? 12 : 0;
+
+      let penalty = Math.min(420, baseValue[p.type] * 0.36);
+      if (defended) penalty *= 0.42;
+
+      // 低价值子被攻击不要过度恐慌
+      if (p.type === "p") penalty *= 0.45;
+      if (p.type === "a" || p.type === "b") penalty *= 0.70;
+
+      return -penalty;
+    }
+
+    function kingSafety(b, color, advisors, elephants) {
+      const king = findKing(b, color);
+      if (!king) return -MATE;
+      let score = advisors * 58 + elephants * 42;
+
+      const enemy = opposite(color);
+      if (filePressureOnKing(b, king.r, king.c, enemy)) score -= 150;
+      if (palaceWeakness(b, color)) score -= 60;
+      if (isSquareAttacked(b, king.r, king.c, enemy)) score -= 200;
+
+      return score;
+    }
+
+    function palaceWeakness(b, color) {
+      const rows = color === "red" ? [7, 8, 9] : [0, 1, 2];
+      let defenders = 0;
+      for (const r of rows) {
+        for (let c = 3; c <= 5; c++) {
+          const p = b[r][c];
+          if (p && p.color === color && (p.type === "a" || p.type === "k")) defenders++;
+        }
+      }
+      return defenders <= 2;
+    }
+
+    function filePressureOnKing(b, kr, kc, enemy) {
+      for (const dr of [-1, 1]) {
+        let nr = kr + dr;
+        let screens = 0;
+        while (inBounds(nr, kc)) {
+          const p = b[nr][kc];
+          if (p) {
+            if (p.color === enemy && p.type === "r" && screens === 0) return true;
+            if (p.color === enemy && p.type === "c" && screens === 1) return true;
+            screens++;
+          }
+          nr += dr;
+        }
+      }
+      return false;
+    }
+
+    function attackPressure(b, color) {
+      let score = 0;
+      const enemy = opposite(color);
+      const enemyKing = findKing(b, enemy);
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color) continue;
+
+          const moves = getPseudoMoves(b, r, c);
+          for (const m of moves) {
+            const target = b[m.r][m.c];
+            if (target && target.color === enemy) score += Math.min(150, baseValue[target.type] / 12);
+          }
+
+          if (enemyKing) {
+            const dist = Math.abs(r - enemyKing.r) + Math.abs(c - enemyKing.c);
+            if (["r", "c", "n", "p"].includes(p.type)) score += Math.max(0, 32 - dist * 3);
+          }
+        }
+      }
+
+      return score;
+    }
+
+    function formationBonus(b, color) {
+      let score = 0;
+
+      // 双车/车炮占中线与肋道奖励
+      for (let c of [3, 4, 5]) {
+        let hasRook = false, hasCannon = false;
+        for (let r = 0; r < ROWS; r++) {
+          const p = b[r][c];
+          if (p && p.color === color && p.type === "r") hasRook = true;
+          if (p && p.color === color && p.type === "c") hasCannon = true;
+        }
+        if (hasRook) score += 22;
+        if (hasRook && hasCannon) score += 38;
+      }
+
+      // 过河兵、连兵、逼近九宫奖励。
+      let crossedPawns = 0;
+      const enemyKing = findKing(b, opposite(color));
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color || p.type !== "p") continue;
+          if (hasCrossedRiver(color, r)) {
+            crossedPawns++;
+            score += 22;
+            if (enemyKing) {
+              const dist = Math.abs(r - enemyKing.r) + Math.abs(c - enemyKing.c);
+              score += Math.max(0, 70 - dist * 10);
+            }
+            for (const dc of [-1, 1]) {
+              const q = b[r]?.[c + dc];
+              if (q && q.color === color && q.type === "p") score += 20;
+            }
+          }
+        }
+      }
+      score += crossedPawns * 14;
+
+      return score;
+    }
+
+    function learnedPositionBonus(b, color) {
+      const key = learningKey(b, color);
+      const bucket = learnBook[key];
+      if (!bucket) return 0;
+      let best = 0;
+      for (const mv of Object.keys(bucket)) best = Math.max(best, bucket[mv]);
+      return Math.max(-120, Math.min(120, best * 18));
+    }
+
+    function chooseOpeningBookMove(b, color, legalMoves) {
+      const turnNo = moveRecords.length;
+      const redBook = [
+        // 中炮、屏风马、进三兵/七兵、出直车常见发展手段
+        [7,1,7,4], [7,7,7,4], [9,1,7,2], [9,7,7,6], [6,4,5,4],
+        [9,0,8,0], [9,8,8,8], [9,2,7,4], [9,6,7,4], [6,2,5,2], [6,6,5,6],
+        [7,4,4,4], [8,0,8,4], [8,8,8,4], [7,2,5,3], [7,6,5,5],
+        [9,3,8,4], [9,5,8,4], [6,0,5,0], [6,8,5,8]
+      ];
+      const blackBook = [
+        [2,1,2,4], [2,7,2,4], [0,1,2,2], [0,7,2,6], [3,4,4,4],
+        [0,0,1,0], [0,8,1,8], [0,2,2,4], [0,6,2,4], [3,2,4,2], [3,6,4,6],
+        [2,4,5,4], [1,0,1,4], [1,8,1,4], [2,2,4,3], [2,6,4,5],
+        [0,3,1,4], [0,5,1,4], [3,0,4,0], [3,8,4,8]
+      ];
+
+      const book = color === "red" ? redBook : blackBook;
+      const candidates = [];
+      const cap = Math.min(book.length, 6 + Math.floor(turnNo * 1.6));
+      for (let i = 0; i < cap; i++) {
+        const raw = book[i];
+        const move = { from: { r: raw[0], c: raw[1] }, to: { r: raw[2], c: raw[3] } };
+        if (legalMoves.some(m => sameMove(m, move))) candidates.push(move);
+      }
+
+      if (!candidates.length) return null;
+      return orderMoves(b, candidates, color, color, 0, null)[0];
+    }
+
+    function seedBuiltInMasterBook() {
+      if (localStorage.getItem(SEED_KEY)) return;
+      const lines = [
+        [[7,1,7,4],[0,1,2,2],[9,1,7,2],[0,7,2,6],[9,0,8,0],[0,0,1,0],[6,4,5,4],[3,4,4,4]],
+        [[7,1,7,4],[0,1,2,2],[9,7,7,6],[2,7,2,4],[6,2,5,2],[3,6,4,6],[9,0,8,0],[0,8,1,8]],
+        [[9,1,7,2],[0,1,2,2],[7,1,7,4],[0,7,2,6],[6,6,5,6],[3,2,4,2],[9,0,8,0],[0,0,1,0]],
+        [[9,2,7,4],[0,1,2,2],[9,1,7,2],[2,1,2,4],[6,4,5,4],[3,4,4,4],[9,0,8,0],[0,0,1,0]],
+        [[7,7,7,4],[0,7,2,6],[9,7,7,6],[0,1,2,2],[6,4,5,4],[3,4,4,4],[9,8,8,8],[0,8,1,8]],
+        [[6,2,5,2],[0,1,2,2],[9,1,7,2],[2,7,2,4],[7,1,7,4],[0,8,1,8],[9,0,8,0],[3,6,4,6]],
+        [[6,6,5,6],[0,7,2,6],[9,7,7,6],[2,1,2,4],[7,7,7,4],[0,0,1,0],[9,8,8,8],[3,2,4,2]]
+      ];
+      for (const line of lines) addLineToLearnBook(line, 4.5);
+      saveLearnBook();
+      localStorage.setItem(SEED_KEY, "1");
+    }
+
+    function addLineToLearnBook(line, weight = 2) {
+      let b = createInitialBoard();
+      let side = "red";
+      for (let i = 0; i < line.length; i++) {
+        const raw = line[i];
+        const move = { from: { r: raw[0], c: raw[1] }, to: { r: raw[2], c: raw[3] } };
+        const legal = generateAllLegalMoves(b, side);
+        if (!legal.some(m => sameMove(m, move))) break;
+        const key = learningKey(b, side);
+        const mv = moveKey(move);
+        if (!learnBook[key]) learnBook[key] = {};
+        learnBook[key][mv] = (learnBook[key][mv] || 0) + weight * Math.max(0.35, 1 - i / 18);
+        b = applyMoveToClone(b, move);
+        side = opposite(side);
+      }
+    }
+
+    function chooseLearnedMove(b, color, legalMoves) {
+      const key = learningKey(b, color);
+      const bucket = learnBook[key];
+      if (!bucket) return null;
+
+      let bestMove = null;
+      let bestScore = 0;
+      for (const m of legalMoves) {
+        const s = bucket[moveKey(m)] || 0;
+        if (s > bestScore) {
+          bestScore = s;
+          bestMove = m;
+        }
+      }
+      return bestScore > 1 ? bestMove : null;
+    }
+
+    function learnFromResult(winner) {
+      if (!winner) return;
+
+      for (let i = 0; i < positionHistory.length; i++) {
+        const item = positionHistory[i];
+        const reward = item.color === winner ? 1 : -1;
+        const decay = Math.max(0.25, 1 - i / Math.max(40, positionHistory.length * 1.4));
+        const delta = reward * decay;
+
+        if (!learnBook[item.key]) learnBook[item.key] = {};
+        if (!learnBook[item.key][item.move]) learnBook[item.key][item.move] = 0;
+
+        learnBook[item.key][item.move] += delta;
+        learnBook[item.key][item.move] = Math.max(-20, Math.min(20, learnBook[item.key][item.move]));
+      }
+
+      saveLearnBook();
+    }
+
+    async function trainSelfPlay(games = 20) {
+      if (training || aiThinking) return;
+      training = true;
+      trainBtn.disabled = true;
+      trainDeepBtn.disabled = true;
+      restartBtn.disabled = true;
+      undoBtn.disabled = true;
+
+      const oldMode = modeEl.value;
+      const oldDifficulty = difficultyEl.value;
+      let redWins = 0;
+      let blackWins = 0;
+      let draws = 0;
+
+      for (let g = 1; g <= games; g++) {
+        let tb = createInitialBoard();
+        let side = "red";
+        let localHistory = [];
+        let winner = null;
+        let noCapture = 0;
+
+        for (let ply = 0; ply < 180; ply++) {
+          const legal = generateAllLegalMoves(tb, side);
+          if (!legal.length) {
+            winner = opposite(side);
+            break;
+          }
+
+          // 训练用轻量搜索，避免浏览器卡太久
+          const move = chooseTrainingMove(tb, side, ply);
+          const moving = tb[move.from.r][move.from.c];
+          const captured = tb[move.to.r][move.to.c];
+          localHistory.push({ key: learningKey(tb, side), move: moveKey(move), color: side });
+
+          tb = applyMoveToClone(tb, move);
+          if (captured) noCapture = 0;
+          else noCapture++;
+
+          if (captured && captured.type === "k") {
+            winner = side;
+            break;
+          }
+
+          if (noCapture > 80) break;
+          side = opposite(side);
+        }
+
+        if (winner === "red") redWins++;
+        else if (winner === "black") blackWins++;
+        else draws++;
+
+        learnFromSelfPlayHistory(localHistory, winner);
+        trainTextEl.textContent = `训练中：${g}/${games} 局，红胜 ${redWins}，黑胜 ${blackWins}，和 ${draws}`;
+        trainFillEl.style.width = `${Math.round(g / games * 100)}%`;
+        await sleep(20);
+      }
+
+      saveLearnBook();
+      training = false;
+      trainBtn.disabled = false;
+      trainDeepBtn.disabled = false;
+      restartBtn.disabled = false;
+      undoBtn.disabled = false;
+      modeEl.value = oldMode;
+      difficultyEl.value = oldDifficulty;
+      restartGame();
+    }
+
+    function chooseTrainingMove(b, side, ply) {
+      const moves = generateAllLegalMoves(b, side);
+      if (!moves.length) return null;
+
+      const learned = chooseLearnedMove(b, side, moves);
+      if (learned && Math.random() < 0.30) return learned;
+
+      if (ply < 12) {
+        const book = chooseOpeningBookMove(b, side, moves);
+        if (book && Math.random() < 0.55) return book;
+      }
+
+      // 训练阶段用 2 层小搜索 + 噪声
+      let best = null;
+      let bestScore = -INF;
+      const ordered = orderMoves(b, moves, side, side, 0, null).slice(0, 20);
+
+      for (const m of ordered) {
+        const next = applyMoveToClone(b, m);
+        const score = -simpleTrainingSearch(next, opposite(side), 1) + Math.random() * 120;
+        if (score > bestScore) {
+          bestScore = score;
+          best = m;
+        }
+      }
+
+      return best || moves[Math.floor(Math.random() * moves.length)];
+    }
+
+    function simpleTrainingSearch(b, side, depth) {
+      if (depth <= 0) return evaluateRelative(b, side);
+      const moves = orderMoves(b, generateAllLegalMoves(b, side), side, side, 0, null).slice(0, 14);
+      if (!moves.length) return isInCheck(b, side) ? -MATE / 2 : 0;
+      let best = -INF;
+      for (const m of moves) {
+        const score = -simpleTrainingSearch(applyMoveToClone(b, m), opposite(side), depth - 1);
+        if (score > best) best = score;
+      }
+      return best;
+    }
+
+    function learnFromSelfPlayHistory(hist, winner) {
+      if (!winner) {
+        for (const item of hist) {
+          if (!learnBook[item.key]) learnBook[item.key] = {};
+          learnBook[item.key][item.move] = (learnBook[item.key][item.move] || 0) * 0.995;
+        }
+        return;
+      }
+
+      for (let i = 0; i < hist.length; i++) {
+        const item = hist[i];
+        const result = item.color === winner ? 1 : -1;
+        const earlyWeight = Math.max(0.35, 1 - i / Math.max(50, hist.length * 1.5));
+        const delta = result * earlyWeight;
+
+        if (!learnBook[item.key]) learnBook[item.key] = {};
+        learnBook[item.key][item.move] = (learnBook[item.key][item.move] || 0) + delta;
+        learnBook[item.key][item.move] = Math.max(-30, Math.min(30, learnBook[item.key][item.move]));
+      }
+    }
+
+    function importTrainingText(text) {
+      const lines = text.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+      let games = 0;
+      let movesLearned = 0;
+
+      for (const line of lines) {
+        let b = createInitialBoard();
+        let side = "red";
+        const tokens = line.match(/[A-Ia-i](?:10|[1-9])\s*(?:-|→|:|,)\s*[A-Ia-i](?:10|[1-9])/g) || [];
+        if (!tokens.length) continue;
+        games++;
+
+        for (let i = 0; i < tokens.length; i++) {
+          const move = parseCoordinateMove(tokens[i]);
+          if (!move) continue;
+          const legal = generateAllLegalMoves(b, side);
+          const real = legal.find(m => sameMove(m, move));
+          if (!real) break;
+          const key = learningKey(b, side);
+          const mv = moveKey(real);
+          if (!learnBook[key]) learnBook[key] = {};
+          learnBook[key][mv] = (learnBook[key][mv] || 0) + Math.max(0.4, 2.5 - i * 0.06);
+          learnBook[key][mv] = Math.max(-30, Math.min(40, learnBook[key][mv]));
+          b = applyMoveToClone(b, real);
+          side = opposite(side);
+          movesLearned++;
+        }
+      }
+
+      saveLearnBook();
+      alert(`导入完成：读取 ${games} 盘，学习 ${movesLearned} 步。\n格式示例：B8-E8 B1-C3 H10-G8`);
+    }
+
+    function parseCoordinateMove(token) {
+      const m = token.match(/([A-Ia-i])(10|[1-9])\s*(?:-|→|:|,)\s*([A-Ia-i])(10|[1-9])/);
+      if (!m) return null;
+      const fc = m[1].toUpperCase().charCodeAt(0) - 65;
+      const fr = Number(m[2]) - 1;
+      const tc = m[3].toUpperCase().charCodeAt(0) - 65;
+      const tr = Number(m[4]) - 1;
+      if (!inBounds(fr, fc) || !inBounds(tr, tc)) return null;
+      return { from: { r: fr, c: fc }, to: { r: tr, c: tc } };
+    }
+
+    function loadLearnBook() {
+      try {
+        return JSON.parse(localStorage.getItem(LEARN_KEY) || "{}");
+      } catch {
+        return {};
+      }
+    }
+
+    function saveLearnBook() {
+      try {
+        // 控制大小，只保留强经验
+        const entries = Object.entries(learnBook);
+        if (entries.length > 2500) {
+          entries.sort((a, b) => maxAbsBucket(b[1]) - maxAbsBucket(a[1]));
+          learnBook = Object.fromEntries(entries.slice(0, 2500));
+        }
+        localStorage.setItem(LEARN_KEY, JSON.stringify(learnBook));
+      } catch {}
+      updateTrainingInfo();
+    }
+
+    function maxAbsBucket(bucket) {
+      return Math.max(...Object.values(bucket).map(v => Math.abs(v)), 0);
+    }
+
+    function updateTrainingInfo() {
+      const count = Object.keys(learnBook).length;
+      trainTextEl.textContent = training ? trainTextEl.textContent : `本地训练：${count} 条经验`;
+      if (!training) trainFillEl.style.width = `${Math.min(100, count / 20)}%`;
+    }
+
+    function generateAllLegalMoves(b, color) {
+      const result = [];
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color) continue;
+          const moves = getLegalMoves(b, r, c);
+          for (const to of moves) {
+            result.push({ from: { r, c }, to });
+          }
+        }
+      }
+      return result;
+    }
+
+    function generateTacticalMoves(b, color) {
+      return generateAllLegalMoves(b, color).filter(move => isTacticalMove(b, move, color));
+    }
+
+    function getLegalMoves(b, r, c) {
+      const p = b[r][c];
+      if (!p) return [];
+      const pseudo = getPseudoMoves(b, r, c);
+
+      return pseudo.filter(m => {
+        const next = cloneBoard(b);
+        next[m.r][m.c] = next[r][c];
+        next[r][c] = null;
+        return !isInCheck(next, p.color);
+      });
+    }
+
+    function getPseudoMoves(b, r, c) {
+      const p = b[r][c];
+      if (!p) return [];
+      switch (p.type) {
+        case "k": return kingMoves(b, r, c, p.color);
+        case "a": return advisorMoves(b, r, c, p.color);
+        case "b": return elephantMoves(b, r, c, p.color);
+        case "n": return horseMoves(b, r, c, p.color);
+        case "r": return rookMoves(b, r, c, p.color);
+        case "c": return cannonMoves(b, r, c, p.color);
+        case "p": return pawnMoves(b, r, c, p.color);
+        default: return [];
+      }
+    }
+
+    function kingMoves(b, r, c, color) {
+      const result = [];
+      for (const [dr, dc] of [[1,0], [-1,0], [0,1], [0,-1]]) {
+        const nr = r + dr, nc = c + dc;
+        if (inPalace(nr, nc, color)) addIfAvailable(result, b, nr, nc, color);
+      }
+
+      // 将帅照面
+      for (let nr = r + (color === "red" ? -1 : 1); inBounds(nr, c); nr += (color === "red" ? -1 : 1)) {
+        if (!b[nr][c]) continue;
+        if (b[nr][c].type === "k" && b[nr][c].color !== color) result.push({ r: nr, c });
+        break;
+      }
+
+      return result;
+    }
+
+    function advisorMoves(b, r, c, color) {
+      const result = [];
+      for (const [dr, dc] of [[1,1], [1,-1], [-1,1], [-1,-1]]) {
+        const nr = r + dr, nc = c + dc;
+        if (inPalace(nr, nc, color)) addIfAvailable(result, b, nr, nc, color);
+      }
+      return result;
+    }
+
+    function elephantMoves(b, r, c, color) {
+      const result = [];
+      for (const [dr, dc] of [[2,2], [2,-2], [-2,2], [-2,-2]]) {
+        const nr = r + dr, nc = c + dc;
+        const eyeR = r + dr / 2, eyeC = c + dc / 2;
+        if (!inBounds(nr, nc)) continue;
+        if (color === "red" && nr < 5) continue;
+        if (color === "black" && nr > 4) continue;
+        if (b[eyeR][eyeC]) continue;
+        addIfAvailable(result, b, nr, nc, color);
+      }
+      return result;
+    }
+
+    function horseMoves(b, r, c, color) {
+      const result = [];
+      const candidates = [
+        { dr: 2, dc: 1, leg: [1, 0] }, { dr: 2, dc: -1, leg: [1, 0] },
+        { dr: -2, dc: 1, leg: [-1, 0] }, { dr: -2, dc: -1, leg: [-1, 0] },
+        { dr: 1, dc: 2, leg: [0, 1] }, { dr: -1, dc: 2, leg: [0, 1] },
+        { dr: 1, dc: -2, leg: [0, -1] }, { dr: -1, dc: -2, leg: [0, -1] }
+      ];
+
+      for (const m of candidates) {
+        const nr = r + m.dr, nc = c + m.dc;
+        const lr = r + m.leg[0], lc = c + m.leg[1];
+        if (inBounds(nr, nc) && !b[lr][lc]) addIfAvailable(result, b, nr, nc, color);
+      }
+
+      return result;
+    }
+
+    function rookMoves(b, r, c, color) {
+      const result = [];
+      for (const [dr, dc] of [[1,0], [-1,0], [0,1], [0,-1]]) {
+        let nr = r + dr, nc = c + dc;
+        while (inBounds(nr, nc)) {
+          if (!b[nr][nc]) {
+            result.push({ r: nr, c: nc });
+          } else {
+            if (b[nr][nc].color !== color) result.push({ r: nr, c: nc });
+            break;
+          }
+          nr += dr; nc += dc;
+        }
+      }
+      return result;
+    }
+
+    function cannonMoves(b, r, c, color) {
+      const result = [];
+      for (const [dr, dc] of [[1,0], [-1,0], [0,1], [0,-1]]) {
+        let nr = r + dr, nc = c + dc;
+        let screenFound = false;
+
+        while (inBounds(nr, nc)) {
+          if (!screenFound) {
+            if (!b[nr][nc]) result.push({ r: nr, c: nc });
+            else screenFound = true;
+          } else {
+            if (b[nr][nc]) {
+              if (b[nr][nc].color !== color) result.push({ r: nr, c: nc });
+              break;
+            }
+          }
+          nr += dr; nc += dc;
+        }
+      }
+      return result;
+    }
+
+    function pawnMoves(b, r, c, color) {
+      const result = [];
+      const forward = color === "red" ? -1 : 1;
+      addIfAvailable(result, b, r + forward, c, color);
+
+      if (hasCrossedRiver(color, r)) {
+        addIfAvailable(result, b, r, c - 1, color);
+        addIfAvailable(result, b, r, c + 1, color);
+      }
+
+      return result;
+    }
+
+    function addIfAvailable(result, b, r, c, color) {
+      if (!inBounds(r, c)) return;
+      if (!b[r][c] || b[r][c].color !== color) result.push({ r, c });
+    }
+
+    function isTacticalMove(b, move, color) {
+      if (b[move.to.r][move.to.c]) return true;
+      const next = applyMoveToClone(b, move);
+      return isInCheck(next, opposite(color)) || createsBigThreat(next, move.to.r, move.to.c, color);
+    }
+
+    function createsBigThreat(b, r, c, color) {
+      const p = b[r][c];
+      if (!p) return false;
+
+      for (const m of getPseudoMoves(b, r, c)) {
+        const target = b[m.r][m.c];
+        if (target && target.color !== color && baseValue[target.type] >= 480) return true;
+      }
+
+      return false;
+    }
+
+    function orderMoves(b, moves, color, aiColor = color, ply = 0, ttMove = null) {
+      return [...moves].sort((a, z) => moveScore(b, z, color, aiColor, ply, ttMove) - moveScore(b, a, color, aiColor, ply, ttMove));
+    }
+
+    function moveScore(b, move, color, aiColor, ply, ttMove) {
+      if (ttMove && sameMove(move, ttMove)) return 1e9;
+      if (currentPvMove && sameMove(move, currentPvMove)) return 9e8;
+
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      let score = 0;
+
+      if (target) {
+        // MVV-LVA：先吃大子，用小子吃大子更优
+        score += baseValue[target.type] * 24 - baseValue[p.type] * 0.7;
+      } else {
+        if (killerMoves[ply] && killerMoves[ply].some(k => sameMove(k, move))) score += 10000;
+        score += historyHeuristic.get(moveKey(move)) || 0;
+      }
+
+      const next = applyMoveToClone(b, move);
+      if (isInCheck(next, opposite(color))) score += 1300;
+      if (createsBigThreat(next, move.to.r, move.to.c, color)) score += 520;
+
+      const before = positionalBonus(b, p, move.from.r, move.from.c, gamePhase(b));
+      const after = positionalBonus(next, p, move.to.r, move.to.c, gamePhase(next));
+      score += (after - before) * 3;
+
+      const attacked = isSquareAttacked(next, move.to.r, move.to.c, opposite(color));
+      const defended = isSquareAttacked(next, move.to.r, move.to.c, color, true);
+
+      if (attacked && !defended) score -= baseValue[p.type] * 0.95;
+      else if (attacked) score -= baseValue[p.type] * 0.25;
+
+      const learn = getLearnScoreForMove(b, color, move);
+      score += learn * 160;
+
+      return score;
+    }
+
+    function rememberCutoff(move, depth, ply, tactical) {
+      if (!move || tactical) return;
+      const killers = killerMoves[ply] || (killerMoves[ply] = []);
+      if (!killers.some(k => sameMove(k, move))) {
+        killers.unshift(move);
+        if (killers.length > 2) killers.pop();
+      }
+      const key = moveKey(move);
+      historyHeuristic.set(key, (historyHeuristic.get(key) || 0) + depth * depth * 6);
+    }
+
+    function getLearnScoreForMove(b, color, move) {
+      const bucket = learnBook[learningKey(b, color)];
+      if (!bucket) return 0;
+      return bucket[moveKey(move)] || 0;
+    }
+
+    function isInCheck(b, color) {
+      const king = findKing(b, color);
+      if (!king) return true;
+      return isSquareAttacked(b, king.r, king.c, opposite(color));
+    }
+
+    function isSquareAttacked(b, tr, tc, byColor, includeOwnTarget = false) {
+      const target = b[tr][tc];
+      if (target && target.color === byColor && !includeOwnTarget) return false;
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          if (r === tr && c === tc) continue;
+          const p = b[r][c];
+          if (p && p.color === byColor && attacksSquareFrom(b, r, c, tr, tc)) return true;
+        }
+      }
+
+      return false;
+    }
+
+    function attacksSquareFrom(b, r, c, tr, tc) {
+      const p = b[r][c];
+      if (!p) return false;
+
+      const dr = tr - r;
+      const dc = tc - c;
+      const adr = Math.abs(dr);
+      const adc = Math.abs(dc);
+
+      switch (p.type) {
+        case "k":
+          if (c === tc) {
+            const step = tr > r ? 1 : -1;
+            let nr = r + step;
+            let clear = true;
+            while (nr !== tr) {
+              if (b[nr][c]) { clear = false; break; }
+              nr += step;
+            }
+            if (clear && b[tr][tc] && b[tr][tc].type === "k" && b[tr][tc].color !== p.color) return true;
+          }
+          return adr + adc === 1 && inPalace(tr, tc, p.color);
+
+        case "a":
+          return adr === 1 && adc === 1 && inPalace(tr, tc, p.color);
+
+        case "b":
+          if (adr !== 2 || adc !== 2) return false;
+          if (p.color === "red" && tr < 5) return false;
+          if (p.color === "black" && tr > 4) return false;
+          return !b[r + dr / 2][c + dc / 2];
+
+        case "n":
+          if (!((adr === 2 && adc === 1) || (adr === 1 && adc === 2))) return false;
+          if (adr === 2) return !b[r + dr / 2][c];
+          return !b[r][c + dc / 2];
+
+        case "r":
+          if (r !== tr && c !== tc) return false;
+          return countBetween(b, r, c, tr, tc) === 0;
+
+        case "c":
+          if (r !== tr && c !== tc) return false;
+          return countBetween(b, r, c, tr, tc) === 1;
+
+        case "p":
+          if (p.color === "red") {
+            if (dr === -1 && dc === 0) return true;
+            return hasCrossedRiver(p.color, r) && dr === 0 && adc === 1;
+          } else {
+            if (dr === 1 && dc === 0) return true;
+            return hasCrossedRiver(p.color, r) && dr === 0 && adc === 1;
+          }
+
+        default:
+          return false;
+      }
+    }
+
+    function countBetween(b, r, c, tr, tc) {
+      let count = 0;
+      const dr = Math.sign(tr - r);
+      const dc = Math.sign(tc - c);
+      let nr = r + dr, nc = c + dc;
+
+      while (nr !== tr || nc !== tc) {
+        if (b[nr][nc]) count++;
+        nr += dr;
+        nc += dc;
+      }
+
+      return count;
+    }
+
+    function hasAnyLegalMove(b, color) {
+      return generateAllLegalMoves(b, color).length > 0;
+    }
+
+    function findKing(b, color) {
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (p && p.color === color && p.type === "k") return { r, c };
+        }
+      }
+      return null;
+    }
+
+    function totalMaterial(b) {
+      let sum = 0;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (p && p.type !== "k") sum += baseValue[p.type];
+        }
+      }
+      return sum;
+    }
+
+    function hasMajorMaterial(b, color) {
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (p && p.color === color && ["r", "c", "n"].includes(p.type)) return true;
+        }
+      }
+      return false;
+    }
+
+    function applyMoveToClone(b, move) {
+      const next = cloneBoard(b);
+      next[move.to.r][move.to.c] = next[move.from.r][move.from.c];
+      next[move.from.r][move.from.c] = null;
+      return next;
+    }
+
+    function cloneBoard(b) {
+      return b.map(row => row.map(p => p ? { ...p } : null));
+    }
+
+    function inBounds(r, c) {
+      return r >= 0 && r < ROWS && c >= 0 && c < COLS;
+    }
+
+    function inPalace(r, c, color) {
+      if (c < 3 || c > 5) return false;
+      return color === "red" ? r >= 7 && r <= 9 : r >= 0 && r <= 2;
+    }
+
+    function hasCrossedRiver(color, r) {
+      return color === "red" ? r <= 4 : r >= 5;
+    }
+
+    function opposite(color) {
+      return color === "red" ? "black" : "red";
+    }
+
+    function sameMove(a, b) {
+      return a && b && a.from.r === b.from.r && a.from.c === b.from.c && a.to.r === b.to.r && a.to.c === b.to.c;
+    }
+
+    function moveKey(m) {
+      return `${m.from.r}${m.from.c}${m.to.r}${m.to.c}`;
+    }
+
+    function coordText(r, c) {
+      return `${String.fromCharCode(65 + c)}${r + 1}`;
+    }
+
+    function hashBoard(b, side) {
+      let s = side + ":";
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          s += p ? p.color[0] + p.type : ".";
+        }
+      }
+      return s;
+    }
+
+    function learningKey(b, side) {
+      // 简化局面 key：保存前中局常见结构，避免 localStorage 过大
+      let s = side + "|";
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p) continue;
+          if (["k", "r", "c", "n", "p"].includes(p.type)) {
+            s += `${p.color[0]}${p.type}${r}${c}`;
+          }
+        }
+      }
+      return s;
+    }
+
+    function updateStatus() {
+      const turnText = turn === "red" ? "红方" : "黑方";
+      const turnClass = turn === "red" ? "red" : "black";
+      const aiColor = getAiColor();
+      const inCheck = !gameOver && isInCheck(board, turn);
+
+      if (gameOver) {
+        if (lastMove && lastMove.captured && lastMove.captured.type === "k") {
+          const winner = lastMove.piece.color === "red" ? "红方" : "黑方";
+          statusEl.innerHTML = `游戏结束：<span class="${lastMove.piece.color}">${winner}</span> 获胜。`;
+          return;
+        }
+
+        const winner = opposite(turn);
+        statusEl.innerHTML = `${isInCheck(board, turn) ? "将死" : "困毙"}！<span class="${winner}">${winner === "red" ? "红方" : "黑方"}</span> 获胜。`;
+        return;
+      }
+
+      const modeText = modeEl.value === "ai-vs-ai"
+        ? "　AI 自战"
+        : aiColor ? `　AI 执${aiColor === "red" ? "红" : "黑"}` : "　双人对弈";
+
+      const thinking = aiThinking ? `　🤖 AI 思考中...` : "";
+      statusEl.innerHTML = `轮到：<span class="${turnClass}">${turnText}</span>${modeText}${inCheck ? "　⚠️ 正被将军" : ""}${thinking}<br><span class="small">搜索节点会在控制台显示；训练经验保存在本浏览器。</span>`;
+    }
+
+    function renderMoves() {
+      if (!moveRecords.length) {
+        movesEl.innerHTML = "<div>棋谱会显示在这里。</div>";
+        return;
+      }
+
+      movesEl.innerHTML = moveRecords.map((x, i) => `<div>${i + 1}. ${x}</div>`).join("");
+      movesEl.scrollTop = movesEl.scrollHeight;
+    }
+
+    function restartGame() {
+      board = createInitialBoard();
+      turn = "red";
+      selected = null;
+      legalTargets = [];
+      gameOver = false;
+      lastMove = null;
+      history = [];
+      moveRecords = [];
+      positionHistory = [];
+      aiThinking = false;
+      render();
+      scheduleAiMove();
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    restartBtn.addEventListener("click", restartGame);
+
+    flipBtn.addEventListener("click", () => {
+      flipped = !flipped;
+      render();
+    });
+
+    undoBtn.addEventListener("click", () => {
+      if (aiThinking || training) return;
+      const steps = getAiColor() && modeEl.value !== "two-player" ? 2 : 1;
+
+      for (let i = 0; i < steps && history.length; i++) {
+        const state = history.pop();
+        board = state.board;
+        turn = state.turn;
+        lastMove = state.lastMove;
+        gameOver = state.gameOver;
+        moveRecords = [...state.records];
+        positionHistory = [...state.pos];
+      }
+
+      selected = null;
+      legalTargets = [];
+      render();
+    });
+
+    modeEl.addEventListener("change", restartGame);
+
+    difficultyEl.addEventListener("change", () => {
+      selected = null;
+      legalTargets = [];
+      render();
+      scheduleAiMove();
+    });
+
+    trainBtn.addEventListener("click", () => trainSelfPlay(20));
+    trainDeepBtn.addEventListener("click", () => trainSelfPlay(100));
+
+    importBtn.addEventListener("click", () => importFileEl.click());
+    importFileEl.addEventListener("change", async () => {
+      const file = importFileEl.files && importFileEl.files[0];
+      if (!file) return;
+      const text = await file.text();
+      importTrainingText(text);
+      importFileEl.value = "";
+    });
+
+    clearLearnBtn.addEventListener("click", () => {
+      if (training) return;
+      if (!confirm("确定要清空本地训练经验吗？")) return;
+      learnBook = {};
+      localStorage.removeItem(LEARN_KEY);
+      localStorage.removeItem(SEED_KEY);
+      updateTrainingInfo();
+      render();
+    });
+
+    seedBuiltInMasterBook();
+    render();
+    scheduleAiMove();
+  </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"45c2bf8136a245cd97f1c2e9a96c0730","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
