@@ -415,6 +415,7 @@
         <div class="buttons advanced-actions">
           <button id="train">训练 20 局</button>
           <button id="trainDeep" class="secondary">训练 100 局</button>
+          <button id="stopTrain" class="danger" disabled>停止训练</button>
           <button id="importBtn" class="secondary">导入棋谱</button>
           <input id="importFile" type="file" accept=".txt,.csv,.json" style="display:none" />
           <button id="exportLearn" class="secondary">导出数据</button>
@@ -453,6 +454,7 @@
     const undoBtn = document.getElementById("undo");
     const trainBtn = document.getElementById("train");
     const trainDeepBtn = document.getElementById("trainDeep");
+    const stopTrainBtn = document.getElementById("stopTrain");
     const importBtn = document.getElementById("importBtn");
     const importFileEl = document.getElementById("importFile");
     const clearLearnBtn = document.getElementById("clearLearn");
@@ -519,6 +521,7 @@
     let positionHistory = [];
     let aiThinking = false;
     let training = false;
+    let trainingAbort = false;
 
     let learnBook = loadLearnBook();
     let aiModel = loadAiModel();
@@ -2218,9 +2221,12 @@
 
     async function trainSelfPlay(games = 20) {
       if (training || aiThinking) return;
+
       training = true;
+      trainingAbort = false;
       trainBtn.disabled = true;
       trainDeepBtn.disabled = true;
+      stopTrainBtn.disabled = false;
       restartBtn.disabled = true;
       undoBtn.disabled = true;
 
@@ -2230,65 +2236,98 @@
       let blackWins = 0;
       let draws = 0;
 
-      for (let g = 1; g <= games; g++) {
-        let tb = createInitialBoard();
-        let side = "red";
-        let localHistory = [];
-        let winner = null;
-        let noProgress = 0;
-        let localStateCounts = {};
-        localStateCounts[repetitionKey(tb, side)] = 1;
+      try {
+        for (let g = 1; g <= games; g++) {
+          if (trainingAbort) break;
 
-        for (let ply = 0; ply < 180; ply++) {
-          const legal = generateAllLegalMoves(tb, side);
-          if (!legal.length) {
-            winner = opposite(side);
-            break;
+          let tb = createInitialBoard();
+          let side = "red";
+          let localHistory = [];
+          let winner = null;
+          let noProgress = 0;
+          let localStateCounts = {};
+          localStateCounts[repetitionKey(tb, side)] = 1;
+
+          // 训练不是正式对局搜索，目标是快速产生样本，所以限制每局最大步数。
+          for (let ply = 0; ply < 120; ply++) {
+            if (trainingAbort) break;
+
+            const legal = generateAllLegalMoves(tb, side);
+            if (!legal.length) {
+              winner = opposite(side);
+              break;
+            }
+
+            const move = chooseTrainingMove(tb, side, ply);
+            if (!move) break;
+
+            const moving = tb[move.from.r][move.from.c];
+            const captured = tb[move.to.r][move.to.c];
+            localHistory.push({
+              key: learningKey(tb, side),
+              move: moveKey(move),
+              color: side,
+              features: extractModelFeatures(tb, side)
+            });
+
+            tb = applyMoveToClone(tb, move);
+            const progressed = isProgressMove(moving, move.from.r, move.from.c, move.to.r, move.to.c, captured);
+            if (progressed) noProgress = 0;
+            else noProgress++;
+
+            if (captured && captured.type === "k") {
+              winner = side;
+              break;
+            }
+
+            if (noProgress >= 80) break;
+
+            side = opposite(side);
+            const repKey = repetitionKey(tb, side);
+            localStateCounts[repKey] = (localStateCounts[repKey] || 0) + 1;
+            if (localStateCounts[repKey] >= 3) break;
+
+            // 关键：每 6 个半回合释放一次浏览器主线程，页面就不会“卡死”。
+            if ((ply & 5) === 5) {
+              trainTextEl.textContent = `训练中：${g}/${games}｜第 ${ply + 1} 手`;
+              await yieldToBrowser();
+            }
           }
 
-          // 训练用轻量搜索，避免浏览器卡太久
-          const move = chooseTrainingMove(tb, side, ply);
-          const moving = tb[move.from.r][move.from.c];
-          const captured = tb[move.to.r][move.to.c];
-          localHistory.push({ key: learningKey(tb, side), move: moveKey(move), color: side, features: extractModelFeatures(tb, side) });
+          if (winner === "red") redWins++;
+          else if (winner === "black") blackWins++;
+          else draws++;
 
-          tb = applyMoveToClone(tb, move);
-          const progressed = isProgressMove(moving, move.from.r, move.from.c, move.to.r, move.to.c, captured);
-          if (progressed) noProgress = 0;
-          else noProgress++;
+          learnFromSelfPlayHistory(localHistory, winner);
+          trainTextEl.textContent = trainingAbort
+            ? `已停止：完成 ${g - 1}/${games} 局`
+            : `训练中：${g}/${games}｜红 ${redWins} 黑 ${blackWins} 和 ${draws}`;
+          trainFillEl.style.width = `${Math.round(g / games * 100)}%`;
 
-          if (captured && captured.type === "k") {
-            winner = side;
-            break;
-          }
+          // 每局结束也释放主线程，保证按钮、滚动、页面刷新能响应。
+          await yieldToBrowser();
 
-          if (noProgress >= 120) break;
-
-          side = opposite(side);
-          const repKey = repetitionKey(tb, side);
-          localStateCounts[repKey] = (localStateCounts[repKey] || 0) + 1;
-          if (localStateCounts[repKey] >= 3) break;
+          // 分批保存，避免 100 局结束时一次性写 localStorage 卡顿。
+          if (g % 10 === 0) saveLearnBook();
         }
 
-        if (winner === "red") redWins++;
-        else if (winner === "black") blackWins++;
-        else draws++;
-
-        learnFromSelfPlayHistory(localHistory, winner);
-        trainTextEl.textContent = `训练中：${g}/${games}｜红 ${redWins} 黑 ${blackWins} 和 ${draws}`;
-        trainFillEl.style.width = `${Math.round(g / games * 100)}%`;
-        await sleep(20);
+        saveLearnBook();
+      } finally {
+        training = false;
+        trainingAbort = false;
+        trainBtn.disabled = false;
+        trainDeepBtn.disabled = false;
+        stopTrainBtn.disabled = true;
+        restartBtn.disabled = false;
+        undoBtn.disabled = false;
+        modeEl.value = oldMode;
+        difficultyEl.value = oldDifficulty;
+        restartGame();
       }
+    }
 
-      saveLearnBook();
-      training = false;
-      trainBtn.disabled = false;
-      trainDeepBtn.disabled = false;
-      restartBtn.disabled = false;
-      undoBtn.disabled = false;
-      modeEl.value = oldMode;
-      difficultyEl.value = oldDifficulty;
-      restartGame();
+    function yieldToBrowser() {
+      return new Promise(resolve => setTimeout(resolve, 0));
     }
 
     function chooseTrainingMove(b, side, ply) {
@@ -2297,33 +2336,45 @@
       moves = filterObviousBlunders(b, moves, side);
 
       const learned = chooseLearnedMove(b, side, moves);
-      if (learned && Math.random() < 0.30) return learned;
+      if (learned && Math.random() < 0.22) return learned;
 
-      if (ply < 12) {
+      if (ply < 10) {
         const book = chooseOpeningBookMove(b, side, moves);
-        if (book && Math.random() < 0.55) return book;
+        if (book && Math.random() < 0.42 && !isObviousBlunder(b, book, side)) return book;
       }
 
-      // 训练阶段用 2 层小搜索 + 噪声
-      let best = null;
+      // 快速自战：只评分前 12 个候选，不做多层递归搜索。
+      // 这样训练 100 局不会把浏览器主线程长时间占满。
+      const ordered = orderMoves(b, moves, side, side, 0, null).slice(0, 12);
+      let best = ordered[0] || moves[0];
       let bestScore = -INF;
-      const ordered = orderMoves(b, moves, side, side, 0, null).slice(0, 20);
 
       for (const m of ordered) {
         const next = applyMoveToClone(b, m);
-        const score = -simpleTrainingSearch(next, opposite(side), 1) + Math.random() * 120;
+        const target = b[m.to.r][m.to.c];
+
+        let score = evaluateRelative(next, side);
+        score += modelPolicyPrior(b, m, side) * 160;
+        score += getLearnScoreForMove(b, side, m) * 90;
+        if (target) score += (baseValue[target.type] || 0) * 0.35;
+        if (isInCheck(next, opposite(side))) score += 90;
+        score -= landingSquareRisk(next, m.to.r, m.to.c, side) * 1.6;
+
+        // 加一点探索噪声，模拟强化学习里的 exploration。
+        score += Math.random() * 180;
+
         if (score > bestScore) {
           bestScore = score;
           best = m;
         }
       }
 
-      return best || moves[Math.floor(Math.random() * moves.length)];
+      return best;
     }
 
     function simpleTrainingSearch(b, side, depth) {
       if (depth <= 0) return evaluateRelative(b, side);
-      const moves = orderMoves(b, generateAllLegalMoves(b, side), side, side, 0, null).slice(0, 14);
+      const moves = orderMoves(b, generateAllLegalMoves(b, side), side, side, 0, null).slice(0, 8);
       if (!moves.length) return isInCheck(b, side) ? -MATE / 2 : 0;
       let best = -INF;
       for (const m of moves) {
@@ -3182,6 +3233,12 @@
 
     trainBtn.addEventListener("click", () => trainSelfPlay(20));
     trainDeepBtn.addEventListener("click", () => trainSelfPlay(100));
+
+    stopTrainBtn.addEventListener("click", () => {
+      trainingAbort = true;
+      stopTrainBtn.disabled = true;
+      trainTextEl.textContent = "正在停止训练...";
+    });
 
     exportLearnBtn.addEventListener("click", exportTrainingData);
 
