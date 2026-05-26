@@ -495,10 +495,10 @@
     };
 
     const AI_LEVELS = {
-      1: { depth: 4, timeMs: 900, maxQuiet: 22, randomNoise: 18, mctsMs: 0, mctsSims: 0 },
-      2: { depth: 6, timeMs: 2600, maxQuiet: 36, randomNoise: 2, mctsMs: 360, mctsSims: 26 },
-      3: { depth: 7, timeMs: 4300, maxQuiet: 46, randomNoise: 0, mctsMs: 720, mctsSims: 52 },
-      4: { depth: 8, timeMs: 7200, maxQuiet: 58, randomNoise: 0, mctsMs: 1150, mctsSims: 86 }
+      1: { depth: 3, timeMs: 420, maxQuiet: 14, randomNoise: 16, mctsMs: 0, mctsSims: 0, rootLimit: 10 },
+      2: { depth: 4, timeMs: 850, maxQuiet: 20, randomNoise: 2, mctsMs: 0, mctsSims: 0, rootLimit: 12 },
+      3: { depth: 5, timeMs: 1500, maxQuiet: 28, randomNoise: 0, mctsMs: 0, mctsSims: 0, rootLimit: 16 },
+      4: { depth: 6, timeMs: 2600, maxQuiet: 36, randomNoise: 0, mctsMs: 220, mctsSims: 12, rootLimit: 20 }
     };
 
     let board = createInitialBoard();
@@ -1120,7 +1120,7 @@
 
       score -= landingSquareRisk(next, move.to.r, move.to.c, color) * 2.2;
       score -= exposedMajorPieceRisk(b, next, color) * 0.9;
-      score -= severeBlunderScore(b, move, color) * 2.8;
+      score -= (moveRecords.length < 40 ? severeBlunderScore(b, move, color) : 0) * 1.2;
       score += masterStyleMoveBonus(b, move, color) * 140;
       score += masterDefenseBonus(b, move, color) * 1.4;
 
@@ -1344,6 +1344,93 @@
       }
     }
 
+
+    function filterFastRootBlunders(b, moves, color) {
+      if (!moves || moves.length <= 1) return moves;
+
+      const safe = [];
+      for (const move of moves) {
+        const p = b[move.from.r][move.from.c];
+        const target = b[move.to.r][move.to.c];
+        if (!p) continue;
+
+        const next = applyMoveToClone(b, move);
+        const enemy = opposite(color);
+
+        // 立即胜着保留
+        if (target && target.type === "k") {
+          safe.push(move);
+          continue;
+        }
+
+        // 走完让对方一步杀，剔除
+        if (findImmediateWinMove(next, enemy)) continue;
+
+        const check = isInCheck(next, enemy);
+        const gain = target ? (baseValue[target.type] || 0) : 0;
+        const risk = landingSquareRisk(next, move.to.r, move.to.c, color);
+        const exposed = exposedMajorPieceRisk(b, next, color);
+
+        // 快速粗筛：只杀明显送大子的招，不做重型 opponentPunish/SEE。
+        if (!check && gain < 300 && risk > 520) continue;
+        if (!check && gain < 420 && exposed > 680) continue;
+        if (p.type === "r" && !target && risk > 260) continue;
+
+        safe.push(move);
+      }
+
+      return safe.length ? safe : moves;
+    }
+
+    function fastRootMoveScore(b, move, color) {
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      if (!p) return -INF;
+
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+      let score = 0;
+
+      if (target) score += (baseValue[target.type] || 0) * 1.35 - (baseValue[p.type] || 0) * 0.08;
+      if (isInCheck(next, enemy)) score += 420;
+      if (createsBigThreat(next, move.to.r, move.to.c, color)) score += 220;
+
+      const before = positionalBonus(b, p, move.from.r, move.from.c, gamePhase(b));
+      const after = positionalBonus(next, p, move.to.r, move.to.c, gamePhase(next));
+      score += (after - before) * 3.2;
+
+      score += getLearnScoreForMove(b, color, move) * 90;
+      score -= landingSquareRisk(next, move.to.r, move.to.c, color) * 1.5;
+      score -= exposedMajorPieceRisk(b, next, color) * 0.55;
+
+      if (moveRecords.length < 12) {
+        if (p.type === "r" && !target) score -= 170;
+        if (p.type === "n" || p.type === "c") score += 70;
+        if (p.type === "p" && [2, 4, 6].includes(move.from.c)) score += 35;
+      }
+
+      return score;
+    }
+
+    function limitRootCandidates(b, moves, color, limit = 16) {
+      if (!moves || moves.length <= limit) return moves;
+      return moves
+        .map(move => ({ move, score: fastRootMoveScore(b, move, color) }))
+        .sort((a, z) => z.score - a.score)
+        .slice(0, limit)
+        .map(x => x.move);
+    }
+
+    function putMoveFirst(moves, firstMove) {
+      if (!firstMove) return moves;
+      const index = moves.findIndex(m => sameMove(m, firstMove));
+      if (index <= 0) return moves;
+      const copy = moves.slice();
+      const [m] = copy.splice(index, 1);
+      copy.unshift(m);
+      return copy;
+    }
+
     function chooseAiMove(b, aiColor, difficulty) {
       let moves = generateAllLegalMoves(b, aiColor);
       if (moves.length === 0) return null;
@@ -1354,12 +1441,14 @@
       const immediateWin = findImmediateWinMove(b, aiColor, moves);
       if (immediateWin) return immediateWin;
 
-      // 根节点先过滤明显送大子的招法。若全都危险，才保留原招。
-      moves = filterObviousBlunders(b, moves, aiColor);
+      // 极速安全筛选：只做必要的防一步杀、防明显送大子，避免每步卡顿。
+      moves = filterFastRootBlunders(b, moves, aiColor);
 
-      // 更严格的安全闸门：优先保留不会被对方白吃大子/一步杀的招。
-      moves = filterSevereBlunders(b, moves, aiColor);
-      moves = masterCandidateGate(b, moves, aiColor);
+      // 高难度才使用较重的大师候选筛选；低难度追求流畅。
+      if (difficulty >= 4) moves = masterCandidateGate(b, moves, aiColor);
+
+      // 控制根节点候选数量，速度提升最明显。
+      moves = limitRootCandidates(b, moves, aiColor, profile.rootLimit || 16);
 
       // 再过滤“我走完后，对方下一步就能杀”的招，防止漏防一步杀。
       const notAllowMate = moves.filter(m => !allowsImmediateWin(b, m, aiColor));
@@ -1386,10 +1475,11 @@
 
       // AlphaZero-like root MCTS: 先用 policy/value 做一次根节点搜索，
       // 再把结果作为 Alpha-Beta 的主变提示，减少低级漏招并更像“大局观”选点。
-      const mctsHint = difficulty >= 2 ? chooseAlphaZeroStyleMove(b, aiColor, moves, profile) : null;
+      const mctsHint = difficulty >= 4 ? chooseAlphaZeroStyleMove(b, aiColor, moves, profile) : null;
       if (mctsHint) currentPvMove = mctsHint;
 
-      let bestMove = mctsHint || orderMoves(b, moves, aiColor, aiColor, 0, null)[0];
+      let rootOrdered = orderMoves(b, moves, aiColor, aiColor, 0, mctsHint);
+      let bestMove = mctsHint || rootOrdered[0];
       let bestScore = -INF;
 
       for (let depth = 1; depth <= profile.depth; depth++) {
@@ -1404,7 +1494,7 @@
           localScore = -INF;
           searchStopped = false;
 
-          const ordered = orderMoves(b, moves, aiColor, aiColor, 0, bestMove);
+          const ordered = putMoveFirst(rootOrdered, bestMove);
           for (const move of ordered) {
             const next = applyMoveToClone(b, move);
             const score = -negamax(next, depth - 1, -beta, -alpha, opposite(aiColor), aiColor, 1, true, profile);
@@ -1632,7 +1722,7 @@
 
     function shouldStop() {
       nodes++;
-      return (nodes & 4095) === 0 && performance.now() > searchDeadline;
+      return (nodes & 1023) === 0 && performance.now() > searchDeadline;
     }
 
     function evaluateRelative(b, side) {
@@ -3063,13 +3153,8 @@
     function chooseTrainingMove(b, side, ply) {
       let moves = generateAllLegalMoves(b, side);
       if (!moves.length) return null;
-      moves = filterObviousBlunders(b, moves, side);
-      moves = masterCandidateGate(b, moves, side);
-
-      if (ply < 60 && Math.random() < 0.12) {
-        const teacher = chooseAlphaZeroStyleMove(b, side, moves, { depth: 5, mctsMs: 55, mctsSims: 8 });
-        if (teacher && !isObviousBlunder(b, teacher, side)) return teacher;
-      }
+      moves = filterFastRootBlunders(b, moves, side);
+      moves = limitRootCandidates(b, moves, side, 12);
 
       const learned = chooseLearnedMove(b, side, moves);
       if (learned && Math.random() < 0.22) return learned;
@@ -3527,7 +3612,7 @@
       const landingRisk = landingSquareRisk(next, move.to.r, move.to.c, color);
       if (landingRisk > 0) score -= landingRisk * 2.15;
 
-      const severeRisk = ply <= 1 ? severeBlunderScore(b, move, color) : 0;
+      const severeRisk = ply === 0 ? severeBlunderScore(b, move, color) : 0;
       if (severeRisk > 0) score -= severeRisk * 4.2;
 
       if (target) {
