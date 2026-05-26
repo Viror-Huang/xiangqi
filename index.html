@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>中国象棋 AI Pro Max｜网站训练库版</title>
+  <title>中国象棋 AI Pro Max｜强棋版｜真实长打规则版</title>
   <style>
     :root {
       --line: #5b2f12;
@@ -21,8 +21,9 @@
       margin: 0;
       min-height: 100vh;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
+      overflow-y: scroll;
       background: radial-gradient(circle at top, #fff3d6, #d9a35a 70%);
       font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
       color: #29170a;
@@ -34,7 +35,8 @@
       grid-template-columns: minmax(320px, 660px) minmax(270px, 1fr);
       gap: 18px;
       align-items: start;
-      padding: 18px;
+      justify-content: center;
+      padding: 22px 18px 18px;
     }
 
     .panel {
@@ -51,7 +53,9 @@
     }
 
     .status {
-      min-height: 72px;
+      height: 88px;
+      min-height: 88px;
+      overflow: auto;
       margin: 8px 0 14px;
       padding: 12px;
       border-radius: 14px;
@@ -177,14 +181,20 @@
       right: 0;
       top: 44.5%;
       height: 11%;
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       align-items: center;
-      justify-content: space-around;
+      justify-items: center;
       font-size: clamp(22px, 5vw, 44px);
       font-family: "KaiTi", "STKaiti", serif;
-      letter-spacing: 0.45em;
       color: rgba(91, 47, 18, 0.72);
       pointer-events: none;
+    }
+
+    .river span {
+      letter-spacing: 0.32em;
+      white-space: nowrap;
+      transform: translateX(0.16em);
     }
 
     .cell {
@@ -246,6 +256,7 @@
 
     .move-list {
       margin-top: 12px;
+      height: 230px;
       max-height: 230px;
       overflow: auto;
       padding-right: 6px;
@@ -279,7 +290,7 @@
     </section>
 
     <aside class="panel">
-      <h1>中国象棋 AI Pro Max｜网站训练库版</h1>
+      <h1>中国象棋 AI Pro Max｜真实长打规则版</h1>
       <div id="status" class="status"></div>
 
       <div class="settings">
@@ -296,8 +307,8 @@
           <select id="difficulty">
             <option value="1">简单：3 层</option>
             <option value="2">普通：6 层</option>
-            <option value="3" selected>困难：8 层限时</option>
-            <option value="4">大师：10 层限时</option>
+            <option value="3" selected>困难：9 层限时</option>
+            <option value="4">大师：11 层强搜</option>
           </select>
         </label>
       </div>
@@ -323,7 +334,7 @@
       </div>
 
       <ul class="tips">
-        <li>AI 使用强化开局库、PVS/Alpha-Beta、置换表、静态搜索、杀棋延伸。</li>
+        <li>AI 使用强化开局库、PVS/Alpha-Beta、置换表、静态搜索、杀棋延伸、重要吃子延伸和更强局面评估。</li>
         <li>“深度训练 100 局”会在本机自我对弈，并把结果保存到浏览器 localStorage。</li>
         <li>可导入坐标棋谱训练，例如：B8-E8 B1-C3 H10-G8。</li>
       </ul>
@@ -393,10 +404,10 @@
     };
 
     const AI_LEVELS = {
-      1: { depth: 3, timeMs: 750, maxQuiet: 24, randomNoise: 35 },
-      2: { depth: 6, timeMs: 3600, maxQuiet: 42, randomNoise: 5 },
-      3: { depth: 8, timeMs: 7800, maxQuiet: 58, randomNoise: 1 },
-      4: { depth: 10, timeMs: 15500, maxQuiet: 76, randomNoise: 0 }
+      1: { depth: 4, timeMs: 1000, maxQuiet: 26, randomNoise: 18 },
+      2: { depth: 7, timeMs: 5200, maxQuiet: 48, randomNoise: 2 },
+      3: { depth: 9, timeMs: 10500, maxQuiet: 68, randomNoise: 0 },
+      4: { depth: 11, timeMs: 24000, maxQuiet: 92, randomNoise: 0 }
     };
 
     let board = createInitialBoard();
@@ -405,6 +416,14 @@
     let legalTargets = [];
     let flipped = false;
     let gameOver = false;
+    let drawReason = null;
+    let ruleWinner = null;
+    let ruleReason = null;
+    let halfmoveClock = 0;
+    let boardStateCounts = {};
+    let stateTimeline = [];
+    let ruleMoveHistory = [];
+    let checkingStreak = { red: 0, black: 0 };
     let lastMove = null;
     let history = [];
     let moveRecords = [];
@@ -505,7 +524,16 @@
     function drawRiverText() {
       const river = document.createElement("div");
       river.className = "river";
-      river.textContent = flipped ? "界 楚　　　河 漢" : "楚 河　　　漢 界";
+
+      const left = document.createElement("span");
+      const right = document.createElement("span");
+
+      // 翻转棋盘时只交换左右文字，不把单字倒序，避免出现“界楚 / 河漢”的问题。
+      left.textContent = flipped ? "漢 界" : "楚 河";
+      right.textContent = flipped ? "楚 河" : "漢 界";
+
+      river.appendChild(left);
+      river.appendChild(right);
       boardEl.appendChild(river);
     }
 
@@ -592,9 +620,25 @@
       const tr = move.to.r, tc = move.to.c;
       const piece = board[fr][fc];
       const captured = board[tr][tc];
+      const beforeRuleKey = repetitionKey(board, turn);
       if (!piece) return;
 
-      history.push({ board: cloneBoard(board), turn, lastMove, gameOver, records: [...moveRecords], pos: [...positionHistory] });
+      history.push({
+        board: cloneBoard(board),
+        turn,
+        lastMove,
+        gameOver,
+        drawReason,
+        ruleWinner,
+        ruleReason,
+        halfmoveClock,
+        boardStateCounts: { ...boardStateCounts },
+        stateTimeline: [...stateTimeline],
+        ruleMoveHistory: [...ruleMoveHistory],
+        checkingStreak: { ...checkingStreak },
+        records: [...moveRecords],
+        pos: [...positionHistory]
+      });
       positionHistory.push({ key: learningKey(board, turn), move: moveKey(move), color: piece.color });
 
       board[tr][tc] = piece;
@@ -606,6 +650,8 @@
       const recordText = `${piece.color === "red" ? "红" : "黑"}${pieceName[piece.type]} ${coordText(fr, fc)} → ${coordText(tr, tc)}${captured ? ` 吃${pieceName[captured.type]}` : ""}`;
       moveRecords.push(recordText);
 
+      const progressMove = isProgressMove(piece, fr, fc, tr, tc, captured);
+
       if (captured && captured.type === "k") {
         gameOver = true;
         learnFromResult(piece.color);
@@ -613,15 +659,231 @@
         return;
       }
 
+      halfmoveClock = progressMove ? 0 : halfmoveClock + 1;
       turn = opposite(turn);
+
+      const gaveCheck = isInCheck(board, turn);
+      const chaseTargets = getChaseTargetsAfterMove(board, tr, tc, piece.color);
+      const afterRuleKey = repetitionKey(board, turn);
+      ruleMoveHistory.push({
+        beforeKey: beforeRuleKey,
+        afterKey: afterRuleKey,
+        mover: piece.color,
+        move: moveKey(move),
+        pieceType: piece.type,
+        gaveCheck,
+        chaseTargets
+      });
+      stateTimeline.push({ key: afterRuleKey, moveIndex: ruleMoveHistory.length });
+
+      updateCheckingStreak(piece.color, gaveCheck);
+
       if (!hasAnyLegalMove(board, turn)) {
         gameOver = true;
-        const winner = isInCheck(board, turn) ? opposite(turn) : opposite(turn);
+        const winner = opposite(turn);
         learnFromResult(winner);
       }
 
+      if (!gameOver) checkDrawAfterMove();
+
       render();
       scheduleAiMove();
+    }
+
+
+    function isProgressMove(piece, fr, fc, tr, tc, captured) {
+      // 吃子或兵/卒推进算“有进展”。无进展规则只用于防止无意义拖局。
+      return Boolean(captured) || piece.type === "p";
+    }
+
+    function repetitionKey(b, sideToMove) {
+      return hashBoard(b, sideToMove);
+    }
+
+    function resetDrawTrackers() {
+      drawReason = null;
+      ruleWinner = null;
+      ruleReason = null;
+      halfmoveClock = 0;
+      checkingStreak = { red: 0, black: 0 };
+      boardStateCounts = {};
+      ruleMoveHistory = [];
+      stateTimeline = [];
+      const key = repetitionKey(board, turn);
+      boardStateCounts[key] = 1;
+      stateTimeline.push({ key, moveIndex: 0 });
+    }
+
+    function updateCheckingStreak(moverColor, gaveCheck) {
+      if (gaveCheck) {
+        checkingStreak[moverColor] = (checkingStreak[moverColor] || 0) + 1;
+      } else {
+        checkingStreak[moverColor] = 0;
+      }
+      checkingStreak[opposite(moverColor)] = 0;
+    }
+
+    function getChaseTargetsAfterMove(b, r, c, moverColor) {
+      const p = b[r][c];
+      if (!p) return [];
+
+      const targets = [];
+      const attacks = getPseudoMoves(b, r, c);
+
+      for (const m of attacks) {
+        const target = b[m.r][m.c];
+        if (!target || target.color === moverColor || target.type === "k") continue;
+
+        // 用户要求按真实长打思路：长捉属于禁止着法。这里不再像上一版那样判和。
+        // 为避免把无意义威胁算成捉，只记录被当前走子直接攻击的敌方非将帅子。
+        targets.push({
+          label: `${target.color}:${target.type}`,
+          exact: `${target.color}:${target.type}:${m.r}:${m.c}`,
+          type: target.type,
+          color: target.color,
+          value: baseValue[target.type] || 0
+        });
+      }
+
+      return targets;
+    }
+
+    function checkDrawAfterMove() {
+      const key = repetitionKey(board, turn);
+      boardStateCounts[key] = (boardStateCounts[key] || 0) + 1;
+
+      if (boardStateCounts[key] >= 3) {
+        const verdict = analyzeRepetitionRule(key);
+
+        if (verdict && verdict.loser) {
+          ruleWinner = opposite(verdict.loser);
+          ruleReason = `${colorName(verdict.loser)}${verdict.reason}，按长打规则判负`;
+          gameOver = true;
+          learnFromResult(ruleWinner);
+          return true;
+        }
+
+        drawReason = "三次重复局面，双方均未构成单方长将或长捉";
+        gameOver = true;
+        return true;
+      }
+
+      if (halfmoveClock >= 120) {
+        drawReason = "连续 60 回合无吃子且无兵卒推进";
+        gameOver = true;
+        return true;
+      }
+
+      if (checkingStreak.red >= 6) {
+        ruleWinner = "black";
+        ruleReason = "红方连续长将，按长打规则判负";
+        gameOver = true;
+        learnFromResult(ruleWinner);
+        return true;
+      }
+
+      if (checkingStreak.black >= 6) {
+        ruleWinner = "red";
+        ruleReason = "黑方连续长将，按长打规则判负";
+        gameOver = true;
+        learnFromResult(ruleWinner);
+        return true;
+      }
+
+      return false;
+    }
+
+    function analyzeRepetitionRule(repeatedKey) {
+      const occurrences = stateTimeline
+        .map((item, index) => ({ ...item, timelineIndex: index }))
+        .filter(item => item.key === repeatedKey);
+
+      if (occurrences.length < 3) return null;
+
+      // 用最近一次循环判断。当前局面第三次出现时，上一段循环就是“不变作”的核心循环。
+      const prev = occurrences[occurrences.length - 2];
+      const curr = occurrences[occurrences.length - 1];
+      const loopMoves = ruleMoveHistory.slice(prev.moveIndex, curr.moveIndex);
+      if (!loopMoves.length) return null;
+
+      const redKind = classifyForbiddenLoop(loopMoves, "red");
+      const blackKind = classifyForbiddenLoop(loopMoves, "black");
+
+      if (redKind && !blackKind) return { loser: "red", reason: redKind };
+      if (blackKind && !redKind) return { loser: "black", reason: blackKind };
+
+      // 双方都在长打时，各地竞赛细则处理很复杂。这里为了避免误判单方负，按重复和棋处理。
+      return null;
+    }
+
+    function classifyForbiddenLoop(loopMoves, color) {
+      const ownMoves = loopMoves.filter(m => m.mover === color);
+      if (!ownMoves.length) return null;
+
+      if (ownMoves.every(m => m.gaveCheck)) {
+        return "长将";
+      }
+
+      if (isLongChase(ownMoves)) {
+        return "长捉";
+      }
+
+      return null;
+    }
+
+    function isLongChase(ownMoves) {
+      // 长捉：循环中同一方每次都在直接追捉对方棋子。
+      // 完整中国棋规会细分真根、假根、分捉、兑、献等复杂棋例；
+      // 这里实现网页 AI 版的实用判定：若循环内该方每手都直接攻击同类敌子，则判长捉。
+      const chaseMoves = ownMoves.filter(m => m.chaseTargets && m.chaseTargets.length > 0);
+      if (chaseMoves.length !== ownMoves.length) return false;
+
+      let common = new Set(chaseMoves[0].chaseTargets.map(t => t.label));
+      for (let i = 1; i < chaseMoves.length; i++) {
+        const labels = new Set(chaseMoves[i].chaseTargets.map(t => t.label));
+        common = new Set([...common].filter(x => labels.has(x)));
+        if (common.size === 0) return false;
+      }
+
+      return common.size > 0;
+    }
+
+    function wouldLoseByLongRuleAfterMove(b, move, color) {
+      // 只在真实棋局根节点使用：AI 如果优势明显，不应主动走入长将/长捉判负。
+      const next = applyMoveToClone(b, move);
+      const nextSide = opposite(color);
+      const afterKey = repetitionKey(next, nextSide);
+      const existingCount = boardStateCounts[afterKey] || 0;
+      if (existingCount < 2) return false;
+
+      const movedPiece = next[move.to.r][move.to.c];
+      if (!movedPiece) return false;
+
+      const simulatedTimeline = [...stateTimeline, { key: afterKey, moveIndex: ruleMoveHistory.length + 1 }];
+      const simulatedMoves = [...ruleMoveHistory, {
+        beforeKey: repetitionKey(b, color),
+        afterKey,
+        mover: color,
+        move: moveKey(move),
+        pieceType: movedPiece.type,
+        gaveCheck: isInCheck(next, nextSide),
+        chaseTargets: getChaseTargetsAfterMove(next, move.to.r, move.to.c, color)
+      }];
+
+      const occurrences = simulatedTimeline
+        .map((item, index) => ({ ...item, timelineIndex: index }))
+        .filter(item => item.key === afterKey);
+      if (occurrences.length < 3) return false;
+
+      const prev = occurrences[occurrences.length - 2];
+      const curr = occurrences[occurrences.length - 1];
+      const loopMoves = simulatedMoves.slice(prev.moveIndex, curr.moveIndex);
+      const kind = classifyForbiddenLoop(loopMoves, color);
+      return Boolean(kind);
+    }
+
+    function colorName(color) {
+      return color === "red" ? "红方" : "黑方";
     }
 
     function scheduleAiMove() {
@@ -646,6 +908,9 @@
       if (moves.length === 0) return null;
 
       const profile = AI_LEVELS[difficulty] || AI_LEVELS[3];
+
+      const tacticalShot = findImmediateTacticalMove(b, aiColor, moves);
+      if (tacticalShot) return tacticalShot;
 
       const bookMove = chooseOpeningBookMove(b, aiColor, moves);
       if (bookMove && moveRecords.length < 10) return bookMove;
@@ -745,6 +1010,18 @@
         if (alpha >= beta) return cached.value;
       }
 
+      const staticEvalEarly = evaluateRelative(b, side);
+
+      // Razoring/Futility：明显落后且深度很浅时，直接进入静态搜索，节省时间给主线。
+      if (!inCheck && depth <= 2 && staticEvalEarly + 420 * depth <= alpha) {
+        return quiescence(b, alpha, beta, side, ply, 0, profile);
+      }
+
+      // Static null-move pruning：明显足够好时提前截断。
+      if (!inCheck && depth <= 2 && staticEvalEarly - 520 * depth >= beta) {
+        return staticEvalEarly;
+      }
+
       // Null Move Pruning：中盘大幅提速；残局/被将军不用
       if (allowNullMove && depth >= 3 && !inCheck && hasMajorMaterial(b, side) && totalMaterial(b) > 3600) {
         const reduction = depth >= 6 ? 3 : 2;
@@ -753,7 +1030,7 @@
       }
 
       let moves = generateAllLegalMoves(b, side);
-      if (moves.length === 0) return inCheck ? -MATE + ply : -40;
+      if (moves.length === 0) return -MATE + ply;
 
       const ttMove = cached ? cached.bestMove : null;
       moves = orderMoves(b, moves, side, aiColor, ply, ttMove);
@@ -771,6 +1048,8 @@
         if (!inCheck && quiet && depth <= 2 && quietCount++ > profile.maxQuiet) continue;
         if (!inCheck && quiet && depth <= 2 && staticEval + 180 * depth <= alpha) continue;
 
+        const movingPiece = b[move.from.r][move.from.c];
+        const capturedPiece = b[move.to.r][move.to.c];
         const next = applyMoveToClone(b, move);
         const givesCheck = isInCheck(next, opposite(side));
         let newDepth = depth - 1;
@@ -785,6 +1064,10 @@
 
         // 走出将军或连续将军时延伸，减少漏杀。
         if (givesCheck && newDepth < depth) newDepth += 1;
+
+        // 重要吃子、主变招略微延伸，让 AI 更少漏掉兑子后的战术。
+        if (capturedPiece && baseValue[capturedPiece.type] >= 450 && newDepth < depth) newDepth += 1;
+        if (i === 0 && depth >= 5 && currentPvMove && sameMove(move, currentPvMove) && newDepth < depth) newDepth += 1;
 
         let score;
         if (i === 0) {
@@ -837,7 +1120,7 @@
         alpha = Math.max(alpha, standPat);
       }
 
-      if (qDepth >= 8 && !inCheck) return standPat;
+      if (qDepth >= 10 && !inCheck) return standPat;
 
       let moves = inCheck ? generateAllLegalMoves(b, side) : generateTacticalMoves(b, side);
       if (moves.length === 0) return inCheck ? -MATE + ply : standPat;
@@ -845,6 +1128,20 @@
       moves = orderMoves(b, moves, side, side, ply, null);
 
       for (const move of moves) {
+        const captured = b[move.to.r][move.to.c];
+
+        // Delta pruning：静态搜索中，明显追不回 alpha 的小吃子不搜。
+        if (!inCheck && captured && qDepth >= 1) {
+          const margin = baseValue[captured.type] + 260;
+          if (standPat + margin < alpha) continue;
+        }
+
+        // 坏吃子剪枝：吃完马上白丢大子，且不是将军时跳过。
+        if (!inCheck && captured) {
+          const gain = captureStaticGain(b, move, side);
+          if (gain < -180) continue;
+        }
+
         const next = applyMoveToClone(b, move);
         const score = -quiescence(next, -beta, -alpha, opposite(side), ply + 1, qDepth + 1, profile);
         if (score >= beta) return score;
@@ -887,6 +1184,7 @@
       score += kingSafety(b, color, advisors, elephants);
       score += attackPressure(b, color);
       score += formationBonus(b, color);
+      score += advancedStructureBonus(b, color, phase);
       score += learnedPositionBonus(b, color);
 
       if (isInCheck(b, color)) score -= 120;
@@ -1128,6 +1426,104 @@
       return score;
     }
 
+
+    function advancedStructureBonus(b, color, phase) {
+      let score = 0;
+      const enemy = opposite(color);
+      const enemyKing = findKing(b, enemy);
+      const ownKing = findKing(b, color);
+
+      // 兵卒靠近九宫，尤其有车炮马配合时价值更高。
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color) continue;
+
+          if (p.type === "p") {
+            const advance = color === "red" ? 9 - r : r;
+            const palacePressure = enemyKing ? Math.max(0, 6 - (Math.abs(r - enemyKing.r) + Math.abs(c - enemyKing.c))) : 0;
+            score += advance * 4 + palacePressure * 18;
+            if (hasCrossedRiver(color, r) && (c === 3 || c === 4 || c === 5)) score += 28;
+          }
+
+          // 马被困、车炮被边线困住都降低。
+          const mobility = getPseudoMoves(b, r, c).length;
+          if (p.type === "n" && mobility <= 2) score -= 55;
+          if (p.type === "r" && mobility <= 4) score -= 45;
+          if (p.type === "c" && mobility <= 3) score -= 28;
+
+          // 车、炮、马进入对方半场并靠近将帅，给攻击分。
+          if (enemyKing && ["r", "c", "n"].includes(p.type)) {
+            const dist = Math.abs(r - enemyKing.r) + Math.abs(c - enemyKing.c);
+            const crossed = hasCrossedRiver(color, r);
+            score += Math.max(0, 70 - dist * 8) + (crossed ? 24 : 0);
+          }
+        }
+      }
+
+      // 车炮同线压将、车马炮集中在九宫附近。
+      if (enemyKing) {
+        score += lineAttackToKingBonus(b, color, enemyKing);
+        score += palaceAttackNetBonus(b, color, enemyKing);
+      }
+
+      // 残局时将帅活跃略微有用，但不能离宫，这里只奖励中路安全。
+      if (ownKing && phase < 0.35 && ownKing.c === 4) score += 18;
+
+      return score;
+    }
+
+    function lineAttackToKingBonus(b, color, enemyKing) {
+      let score = 0;
+      const kr = enemyKing.r, kc = enemyKing.c;
+
+      // 同列车炮压力
+      for (const dr of [-1, 1]) {
+        let r = kr + dr;
+        let screens = 0;
+        while (inBounds(r, kc)) {
+          const p = b[r][kc];
+          if (p) {
+            if (p.color === color && p.type === "r" && screens === 0) score += 120;
+            if (p.color === color && p.type === "c" && screens === 1) score += 140;
+            screens++;
+          }
+          r += dr;
+        }
+      }
+
+      // 同行车炮压肋道
+      for (const dc of [-1, 1]) {
+        let c = kc + dc;
+        let screens = 0;
+        while (inBounds(kr, c)) {
+          const p = b[kr][c];
+          if (p) {
+            if (p.color === color && p.type === "r" && screens === 0) score += 70;
+            if (p.color === color && p.type === "c" && screens === 1) score += 80;
+            screens++;
+          }
+          c += dc;
+        }
+      }
+
+      return score;
+    }
+
+    function palaceAttackNetBonus(b, color, enemyKing) {
+      let score = 0;
+      const palaceRows = enemyKing.color === "red" ? [7, 8, 9] : [0, 1, 2];
+
+      for (const r of palaceRows) {
+        for (let c = 3; c <= 5; c++) {
+          if (!inBounds(r, c)) continue;
+          if (isSquareAttacked(b, r, c, color)) score += 18;
+        }
+      }
+
+      return Math.min(score, 180);
+    }
+
     function learnedPositionBonus(b, color) {
       const key = learningKey(b, color);
       const bucket = learnBook[key];
@@ -1135,6 +1531,61 @@
       let best = 0;
       for (const mv of Object.keys(bucket)) best = Math.max(best, bucket[mv]);
       return Math.max(-120, Math.min(120, best * 18));
+    }
+
+
+    function findImmediateTacticalMove(b, color, moves) {
+      // 先找一步杀、一步困毙、明显白吃大子的机会，避免开局库或经验表错过战术。
+      let best = null;
+      let bestGain = 0;
+
+      for (const move of moves) {
+        const moving = b[move.from.r][move.from.c];
+        const captured = b[move.to.r][move.to.c];
+        const next = applyMoveToClone(b, move);
+        const enemy = opposite(color);
+
+        if (captured && captured.type === "k") return move;
+
+        const enemyMoves = generateAllLegalMoves(next, enemy);
+        if (enemyMoves.length === 0) return move;
+
+        if (captured) {
+          const gain = captureStaticGain(b, move, color);
+          if (gain > bestGain) {
+            bestGain = gain;
+            best = move;
+          }
+        }
+
+        // 一步将军并且对方只能少数应法，通常是强制手，交给搜索前可优先考虑。
+        if (!best && isInCheck(next, enemy) && enemyMoves.length <= 2) {
+          best = move;
+          bestGain = 280;
+        }
+      }
+
+      return bestGain >= 420 ? best : null;
+    }
+
+    function captureStaticGain(b, move, color) {
+      const moving = b[move.from.r][move.from.c];
+      const captured = b[move.to.r][move.to.c];
+      if (!moving || !captured) return 0;
+
+      const next = applyMoveToClone(b, move);
+      const attacked = isSquareAttacked(next, move.to.r, move.to.c, opposite(color));
+      const defended = isSquareAttacked(next, move.to.r, move.to.c, color, true);
+
+      let gain = baseValue[captured.type] - baseValue[moving.type] * 0.08;
+      if (attacked && !defended) gain -= baseValue[moving.type] * 0.95;
+      else if (attacked) gain -= baseValue[moving.type] * 0.28;
+
+      // 将军吃子、吃未保护大子加分。
+      if (isInCheck(next, opposite(color))) gain += 260;
+      if (!isSquareAttacked(b, move.to.r, move.to.c, captured.color, true)) gain += 80;
+
+      return gain;
     }
 
     function chooseOpeningBookMove(b, color, legalMoves) {
@@ -1254,7 +1705,9 @@
         let side = "red";
         let localHistory = [];
         let winner = null;
-        let noCapture = 0;
+        let noProgress = 0;
+        let localStateCounts = {};
+        localStateCounts[repetitionKey(tb, side)] = 1;
 
         for (let ply = 0; ply < 180; ply++) {
           const legal = generateAllLegalMoves(tb, side);
@@ -1270,16 +1723,21 @@
           localHistory.push({ key: learningKey(tb, side), move: moveKey(move), color: side });
 
           tb = applyMoveToClone(tb, move);
-          if (captured) noCapture = 0;
-          else noCapture++;
+          const progressed = isProgressMove(moving, move.from.r, move.from.c, move.to.r, move.to.c, captured);
+          if (progressed) noProgress = 0;
+          else noProgress++;
 
           if (captured && captured.type === "k") {
             winner = side;
             break;
           }
 
-          if (noCapture > 80) break;
+          if (noProgress >= 120) break;
+
           side = opposite(side);
+          const repKey = repetitionKey(tb, side);
+          localStateCounts[repKey] = (localStateCounts[repKey] || 0) + 1;
+          if (localStateCounts[repKey] >= 3) break;
         }
 
         if (winner === "red") redWins++;
@@ -1725,6 +2183,18 @@
       if (attacked && !defended) score -= baseValue[p.type] * 0.95;
       else if (attacked) score -= baseValue[p.type] * 0.25;
 
+      // 根节点避免优势方主动三次重复；劣势方可以接受和棋。
+      if (ply === 0 && typeof boardStateCounts === "object") {
+        const repeatKey = repetitionKey(next, opposite(color));
+        const repeatCount = boardStateCounts[repeatKey] || 0;
+        if (wouldLoseByLongRuleAfterMove(b, move, color)) {
+          score -= 100000000;
+        } else if (repeatCount >= 2) {
+          const relativeScore = evaluateRelative(b, color);
+          score += relativeScore < -500 ? 900 : -2200;
+        }
+      }
+
       const learn = getLearnScoreForMove(b, color, move);
       score += learn * 160;
 
@@ -1951,6 +2421,16 @@
       const inCheck = !gameOver && isInCheck(board, turn);
 
       if (gameOver) {
+        if (ruleWinner) {
+          statusEl.innerHTML = `判负：${ruleReason}<br><span class="small"><span class="${ruleWinner}">${colorName(ruleWinner)}</span> 获胜。</span>`;
+          return;
+        }
+
+        if (drawReason) {
+          statusEl.innerHTML = `和棋：${drawReason}<br><span class="small">当前规则：长将、单方长捉判负；双方均未犯长打时，三次重复可判和。</span>`;
+          return;
+        }
+
         if (lastMove && lastMove.captured && lastMove.captured.type === "k") {
           const winner = lastMove.piece.color === "red" ? "红方" : "黑方";
           statusEl.innerHTML = `游戏结束：<span class="${lastMove.piece.color}">${winner}</span> 获胜。`;
@@ -1986,11 +2466,15 @@
       selected = null;
       legalTargets = [];
       gameOver = false;
+      ruleWinner = null;
+      ruleReason = null;
+      drawReason = null;
       lastMove = null;
       history = [];
       moveRecords = [];
       positionHistory = [];
       aiThinking = false;
+      resetDrawTrackers();
       render();
       scheduleAiMove();
     }
@@ -2016,6 +2500,14 @@
         turn = state.turn;
         lastMove = state.lastMove;
         gameOver = state.gameOver;
+        drawReason = state.drawReason || null;
+        ruleWinner = state.ruleWinner || null;
+        ruleReason = state.ruleReason || null;
+        halfmoveClock = state.halfmoveClock || 0;
+        boardStateCounts = state.boardStateCounts ? { ...state.boardStateCounts } : {};
+        stateTimeline = state.stateTimeline ? [...state.stateTimeline] : [];
+        ruleMoveHistory = state.ruleMoveHistory ? [...state.ruleMoveHistory] : [];
+        checkingStreak = state.checkingStreak ? { ...state.checkingStreak } : { red: 0, black: 0 };
         moveRecords = [...state.records];
         positionHistory = [...state.pos];
       }
@@ -2069,6 +2561,7 @@
     async function boot() {
       seedBuiltInMasterBook();
       await loadSiteTrainingData(false);
+      resetDrawTrackers();
       render();
       scheduleAiMove();
     }
