@@ -988,6 +988,16 @@
 
     function scheduleAiMove() {
       if (!isAiTurn()) return;
+
+      // AI 自战是演示/训练观察模式，不能每步都跑大师级深搜，
+      // 否则浏览器主线程会被长时间占用，系统会提示“页面没有响应”。
+      if (modeEl.value === "ai-vs-ai" && moveRecords.length >= 260) {
+        drawReason = "AI 自战达到步数上限";
+        gameOver = true;
+        render();
+        return;
+      }
+
       aiThinking = true;
       selected = null;
       legalTargets = [];
@@ -996,11 +1006,152 @@
       setTimeout(() => {
         const aiColor = turn;
         const difficulty = Number(difficultyEl.value);
-        const move = chooseAiMove(board, aiColor, difficulty);
+        const move = modeEl.value === "ai-vs-ai"
+          ? chooseAiVsAiMove(board, aiColor)
+          : chooseAiMove(board, aiColor, difficulty);
+
         aiThinking = false;
         if (move) makeRealMove(move);
         else render();
-      }, modeEl.value === "ai-vs-ai" ? 80 : 180);
+      }, modeEl.value === "ai-vs-ai" ? 220 : 180);
+    }
+
+
+    function chooseAiVsAiMove(b, color) {
+      let moves = generateAllLegalMoves(b, color);
+      if (!moves.length) return null;
+
+      // 自战模式使用快速策略评估，不跑深层搜索，保证页面流畅。
+      // 仍保留防送子、吃子、将军、模型先验和局面评估。
+      const winNow = findImmediateWinMove(b, color, moves);
+      if (winNow) return winNow;
+
+      const safeMoves = moves.filter(m => !isFastObviousBlunder(b, m, color));
+      if (safeMoves.length) moves = safeMoves;
+
+      moves = filterSevereBlunders(b, moves, color);
+
+      const notAllowMate = moves.filter(m => !allowsImmediateWin(b, m, color));
+      if (notAllowMate.length) moves = notAllowMate;
+
+      const immediate = findFastImmediateMove(b, color, moves);
+      if (immediate) return immediate;
+
+      const book = moveRecords.length < 8 ? chooseOpeningBookMove(b, color, moves) : null;
+      if (book && !isFastObviousBlunder(b, book, color) && Math.random() < 0.55) return book;
+
+      let best = moves[0];
+      let bestScore = -INF;
+      const candidates = moves
+        .map(move => ({ move, score: fastMoveScore(b, move, color) }))
+        .sort((a, z) => z.score - a.score)
+        .slice(0, 16);
+
+      for (const item of candidates) {
+        const move = item.move;
+        const next = applyMoveToClone(b, move);
+        let score = item.score;
+
+        // 只对前 16 个候选做一次轻量局面评估，远轻于大师级搜索。
+        score += evaluateRelative(next, color) * 0.45;
+
+        // 防止自战陷入完全确定的重复路线，保留一点探索。
+        score += Math.random() * 35;
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = move;
+        }
+      }
+
+      return best;
+    }
+
+    function findFastImmediateMove(b, color, moves) {
+      const enemy = opposite(color);
+
+      for (const move of moves) {
+        const captured = b[move.to.r][move.to.c];
+        if (captured && captured.type === "k") return move;
+
+        const next = applyMoveToClone(b, move);
+        if (isInCheck(next, enemy)) {
+          const replies = generateAllLegalMoves(next, enemy);
+          if (replies.length <= 1) return move;
+        }
+      }
+
+      let best = null;
+      let bestGain = 0;
+      for (const move of moves) {
+        const captured = b[move.to.r][move.to.c];
+        if (!captured) continue;
+        const gain = captureStaticGain(b, move, color);
+        if (gain > bestGain) {
+          bestGain = gain;
+          best = move;
+        }
+      }
+
+      return bestGain >= 480 ? best : null;
+    }
+
+    function fastMoveScore(b, move, color) {
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      if (!p) return -INF;
+
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+      let score = 0;
+
+      if (target) score += captureStaticGain(b, move, color) * 1.25;
+      if (isInCheck(next, enemy)) score += 380;
+      if (createsBigThreat(next, move.to.r, move.to.c, color)) score += 220;
+      if (findImmediateWinMove(b, color, [move])) score += MATE / 20;
+      if (findImmediateWinMove(next, enemy)) score -= MATE / 18;
+
+      score += modelPolicyPrior(b, move, color) * 260;
+      score += getLearnScoreForMove(b, color, move) * 110;
+
+      const before = positionalBonus(b, p, move.from.r, move.from.c, gamePhase(b));
+      const after = positionalBonus(next, p, move.to.r, move.to.c, gamePhase(next));
+      score += (after - before) * 4;
+
+      score -= landingSquareRisk(next, move.to.r, move.to.c, color) * 2.2;
+      score -= exposedMajorPieceRisk(b, next, color) * 0.9;
+      score -= severeBlunderScore(b, move, color) * 2.8;
+      score += masterStyleMoveBonus(b, move, color) * 120;
+
+      if (moveRecords.length < 12) {
+        if (p.type === "r" && !target) score -= 180;
+        if (p.type === "n" || p.type === "c") score += 55;
+        if (p.type === "p" && hasCrossedRiver(color, move.to.r)) score += 40;
+      }
+
+      return score;
+    }
+
+    function isFastObviousBlunder(b, move, color) {
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      if (!p) return true;
+
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+
+      if (target && target.type === "k") return false;
+      if (isInCheck(next, enemy)) return false;
+      if (findImmediateWinMove(next, enemy)) return true;
+
+      const risk = landingSquareRisk(next, move.to.r, move.to.c, color);
+      const exposed = exposedMajorPieceRisk(b, next, color);
+      const gain = target ? baseValue[target.type] || 0 : 0;
+
+      if (risk >= 360 && gain < risk * 0.75) return true;
+      if (exposed >= 520 && gain < exposed * 0.65) return true;
+
+      return false;
     }
 
     function chooseAiMove(b, aiColor, difficulty) {
@@ -1009,8 +1160,19 @@
 
       const profile = AI_LEVELS[difficulty] || AI_LEVELS[3];
 
+      // 先找自己的一步杀/一步胜。这个优先级最高。
+      const immediateWin = findImmediateWinMove(b, aiColor, moves);
+      if (immediateWin) return immediateWin;
+
       // 根节点先过滤明显送大子的招法。若全都危险，才保留原招。
       moves = filterObviousBlunders(b, moves, aiColor);
+
+      // 更严格的安全闸门：优先保留不会被对方白吃大子/一步杀的招。
+      moves = filterSevereBlunders(b, moves, aiColor);
+
+      // 再过滤“我走完后，对方下一步就能杀”的招，防止漏防一步杀。
+      const notAllowMate = moves.filter(m => !allowsImmediateWin(b, m, aiColor));
+      if (notAllowMate.length) moves = notAllowMate;
 
       const tacticalShot = findImmediateTacticalMove(b, aiColor, moves);
       if (tacticalShot) return tacticalShot;
@@ -1143,6 +1305,9 @@
       let moves = generateAllLegalMoves(b, side);
       if (moves.length === 0) return -MATE + ply;
 
+      const winMove = findImmediateWinMove(b, side, moves);
+      if (winMove) return MATE - ply;
+
       const ttMove = cached ? cached.bestMove : null;
       moves = orderMoves(b, moves, side, aiColor, ply, ttMove);
 
@@ -1235,6 +1400,9 @@
 
       let moves = inCheck ? generateAllLegalMoves(b, side) : generateTacticalMoves(b, side);
       if (moves.length === 0) return inCheck ? -MATE + ply : standPat;
+
+      const winMove = findImmediateWinMove(b, side, moves);
+      if (winMove) return MATE - ply;
 
       moves = orderMoves(b, moves, side, side, ply, null);
 
@@ -1904,6 +2072,99 @@
 
 
 
+
+    function filterSevereBlunders(b, moves, color) {
+      if (!moves || moves.length <= 1) return moves;
+
+      const scored = moves.map(move => ({
+        move,
+        risk: severeBlunderScore(b, move, color)
+      }));
+
+      const safe = scored.filter(x => x.risk <= 0).map(x => x.move);
+      if (safe.length) return safe;
+
+      // 如果没有完全安全的招，至少剔除最差的一批，选择风险最小的几手交给搜索。
+      scored.sort((a, z) => a.risk - z.risk);
+      const bestRisk = scored[0].risk;
+      return scored
+        .filter(x => x.risk <= bestRisk + 260)
+        .slice(0, Math.max(1, Math.ceil(moves.length * 0.45)))
+        .map(x => x.move);
+    }
+
+    function severeBlunderScore(b, move, color) {
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      if (!p) return MATE / 2;
+
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+
+      // 立即胜着不是送子。
+      if (target && target.type === "k") return -MATE / 2;
+      if (generateAllLegalMoves(next, enemy).length === 0) return -MATE / 2;
+      if (isInCheck(next, enemy) && generateAllLegalMoves(next, enemy).length <= 1) return -2000;
+
+      if (findImmediateWinMove(next, enemy)) return MATE / 5;
+
+      const compensation = moveCompensationScore(b, move, color, next, target, isInCheck(next, enemy), generateAllLegalMoves(next, enemy).length);
+      const landing = landingSquareRisk(next, move.to.r, move.to.c, color);
+      const exposed = exposedMajorPieceRisk(b, next, color);
+      const punish = opponentPunishScore(next, enemy) - Math.max(0, opponentPunishScore(b, enemy) * 0.28);
+
+      // SEE：如果这步是吃子但交换后亏很多，也算风险。
+      const see = target ? staticExchangeEval(b, move, color) : 0;
+      const badExchange = see < -120 ? -see : 0;
+
+      let risk = 0;
+      risk = Math.max(risk, landing - compensation * 0.75);
+      risk = Math.max(risk, exposed - compensation * 0.70);
+      risk = Math.max(risk, punish - compensation * 0.85);
+      risk = Math.max(risk, badExchange - compensation * 0.60);
+
+      // 大子非必要落入敌方攻击，额外提升风险。
+      if (["r", "c", "n"].includes(p.type) && !target && landing > 220) risk += 180;
+
+      return Math.max(0, risk);
+    }
+
+    function staticExchangeEval(b, move, color) {
+      const target = b[move.to.r][move.to.c];
+      const moving = b[move.from.r][move.from.c];
+      if (!target || !moving) return 0;
+
+      const next = applyMoveToClone(b, move);
+      const capturedValue = baseValue[target.type] || 0;
+      const recapture = seeRecaptureValue(next, move.to.r, move.to.c, opposite(color), 0);
+      return capturedValue - Math.max(0, recapture);
+    }
+
+    function seeRecaptureValue(b, tr, tc, side, depth) {
+      if (depth >= 6) return 0;
+      const target = b[tr][tc];
+      if (!target || target.color === side) return 0;
+
+      const attackers = generateAllLegalMoves(b, side)
+        .filter(m => m.to.r === tr && m.to.c === tc)
+        .sort((a, z) => {
+          const pa = b[a.from.r][a.from.c];
+          const pz = b[z.from.r][z.from.c];
+          return (baseValue[pa?.type] || 0) - (baseValue[pz?.type] || 0);
+        });
+
+      if (!attackers.length) return 0;
+
+      let best = 0;
+      for (const m of attackers.slice(0, 4)) {
+        const captured = b[tr][tc];
+        const after = applyMoveToClone(b, m);
+        const gain = (baseValue[captured.type] || 0) - Math.max(0, seeRecaptureValue(after, tr, tc, opposite(side), depth + 1));
+        if (gain > best) best = gain;
+      }
+      return best;
+    }
+
     function filterObviousBlunders(b, moves, color) {
       const safe = [];
       for (const move of moves) {
@@ -1925,6 +2186,9 @@
       const enemyMoves = generateAllLegalMoves(next, enemy);
       if (enemyMoves.length === 0) return false;
 
+      // 如果这步走完，对方下一手能直接杀/困毙，就是明显坏棋。
+      if (findImmediateWinMove(next, enemy)) return true;
+
       const givesCheck = isInCheck(next, enemy);
       const compensation = moveCompensationScore(b, move, color, next, captured, givesCheck, enemyMoves.length);
 
@@ -1943,6 +2207,7 @@
       if (landingRisk >= 300 && compensation < landingRisk * 0.95) return true;
       if (newPunish >= 360 && compensation < newPunish * 0.85) return true;
       if (exposedRisk >= 420 && compensation < exposedRisk * 0.80) return true;
+      if (severeBlunderScore(b, move, color) >= 360) return true;
 
       return false;
     }
@@ -2054,6 +2319,62 @@
       return best;
     }
 
+
+    function findImmediateWinMove(b, color, moves = null) {
+      const legalMoves = moves || generateAllLegalMoves(b, color);
+      const enemy = opposite(color);
+
+      for (const move of legalMoves) {
+        const captured = b[move.to.r][move.to.c];
+        if (captured && captured.type === "k") return move;
+
+        const next = applyMoveToClone(b, move);
+        const enemyMoves = generateAllLegalMoves(next, enemy);
+
+        // 中国象棋里无合法着法即负；如果这步让对方无路可走，直接走。
+        if (enemyMoves.length === 0) return move;
+      }
+
+      // 再找强制将军：对方只有 0~1 个应法，通常是强制杀法起点。
+      let best = null;
+      let bestScore = -INF;
+      for (const move of legalMoves) {
+        const next = applyMoveToClone(b, move);
+        if (!isInCheck(next, enemy)) continue;
+
+        const replies = generateAllLegalMoves(next, enemy);
+        if (replies.length <= 1) {
+          const score = evaluateRelative(next, color) + (replies.length === 0 ? MATE / 2 : 900);
+          if (score > bestScore) {
+            bestScore = score;
+            best = move;
+          }
+        }
+      }
+
+      return best;
+    }
+
+    function allowsImmediateWin(b, move, color) {
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+      return Boolean(findImmediateWinMove(next, enemy));
+    }
+
+    function immediateWinThreatScore(b, color) {
+      const enemy = opposite(color);
+      const winMove = findImmediateWinMove(b, enemy);
+      if (!winMove) return 0;
+
+      const captured = b[winMove.to.r][winMove.to.c];
+      if (captured && captured.type === "k") return MATE / 4;
+
+      const next = applyMoveToClone(b, winMove);
+      if (generateAllLegalMoves(next, color).length === 0) return MATE / 5;
+
+      return 1800;
+    }
+
     function findImmediateTacticalMove(b, color, moves) {
       // 先找一步杀、一步困毙、明显白吃大子的机会，避免开局库或经验表错过战术。
       let best = null;
@@ -2117,6 +2438,48 @@
       return gain;
     }
 
+
+    function masterStyleMoveBonus(b, move, color) {
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      if (!p) return 0;
+
+      const next = applyMoveToClone(b, move);
+      let bonus = 0;
+      const turnNo = moveRecords.length;
+
+      // 大师棋谱常见原则：开局先出马炮、挺三七兵，少无故动车、少重复走同一子。
+      if (turnNo < 14) {
+        if (p.type === "n") bonus += hasCrossedRiver(color, move.to.r) ? 0.10 : 0.34;
+        if (p.type === "c") bonus += 0.22;
+        if (p.type === "p" && [2, 4, 6].includes(move.from.c)) bonus += 0.20;
+        if (p.type === "r" && !target && !isInCheck(next, opposite(color))) bonus -= 0.42;
+        if (p.type === "a" || p.type === "b") bonus -= 0.10;
+      }
+
+      // 中局：大子集中攻王、控制中线、形成车炮线。
+      const enemyKing = findKing(b, opposite(color));
+      if (enemyKing) {
+        const beforeDist = Math.abs(move.from.r - enemyKing.r) + Math.abs(move.from.c - enemyKing.c);
+        const afterDist = Math.abs(move.to.r - enemyKing.r) + Math.abs(move.to.c - enemyKing.c);
+        if (["r", "c", "n"].includes(p.type) && afterDist < beforeDist) bonus += 0.16;
+        if ([3, 4, 5].includes(move.to.c)) bonus += 0.08;
+      }
+
+      // 安全第一：有保护、没有被低价子攻击。
+      const risk = landingSquareRisk(next, move.to.r, move.to.c, color);
+      if (risk <= 0) bonus += 0.16;
+      else bonus -= Math.min(0.65, risk / 900);
+
+      // 好的吃子必须交换后不亏。
+      if (target) {
+        const see = staticExchangeEval(b, move, color);
+        bonus += Math.max(-0.8, Math.min(0.8, see / 700));
+      }
+
+      return bonus;
+    }
+
     function chooseOpeningBookMove(b, color, legalMoves) {
       const turnNo = moveRecords.length;
       const redBook = [
@@ -2151,16 +2514,29 @@
 
     function seedBuiltInMasterBook() {
       if (localStorage.getItem(SEED_KEY)) return;
+      // 内置的是“大师风格开局模板”，不是死记硬背整盘棋。
+      // 目的：让 AI 学会常见开局原则：先出马炮、挺三七兵、避免无故动车和送子。
       const lines = [
-        [[7,1,7,4],[0,1,2,2],[9,1,7,2],[0,7,2,6],[9,0,8,0],[0,0,1,0],[6,4,5,4],[3,4,4,4]],
-        [[7,1,7,4],[0,1,2,2],[9,7,7,6],[2,7,2,4],[6,2,5,2],[3,6,4,6],[9,0,8,0],[0,8,1,8]],
-        [[9,1,7,2],[0,1,2,2],[7,1,7,4],[0,7,2,6],[6,6,5,6],[3,2,4,2],[9,0,8,0],[0,0,1,0]],
-        [[9,2,7,4],[0,1,2,2],[9,1,7,2],[2,1,2,4],[6,4,5,4],[3,4,4,4],[9,0,8,0],[0,0,1,0]],
-        [[7,7,7,4],[0,7,2,6],[9,7,7,6],[0,1,2,2],[6,4,5,4],[3,4,4,4],[9,8,8,8],[0,8,1,8]],
+        // 中炮对屏风马
+        [[7,1,7,4],[0,1,2,2],[9,1,7,2],[0,7,2,6],[9,0,8,0],[3,6,4,6],[6,6,5,6],[2,7,2,4],[9,7,7,6],[0,0,1,0]],
+        [[7,1,7,4],[0,7,2,6],[9,7,7,6],[0,1,2,2],[6,2,5,2],[3,2,4,2],[9,0,8,0],[0,8,1,8],[9,1,7,2],[2,1,2,4]],
+        [[7,1,7,4],[0,1,2,2],[9,1,7,2],[2,7,2,4],[6,4,5,4],[3,4,4,4],[9,7,7,6],[0,7,2,6]],
+
+        // 仙人指路、对卒底炮/顺势发展
         [[6,2,5,2],[0,1,2,2],[9,1,7,2],[2,7,2,4],[7,1,7,4],[0,8,1,8],[9,0,8,0],[3,6,4,6]],
-        [[6,6,5,6],[0,7,2,6],[9,7,7,6],[2,1,2,4],[7,7,7,4],[0,0,1,0],[9,8,8,8],[3,2,4,2]]
+        [[6,6,5,6],[0,7,2,6],[9,7,7,6],[2,1,2,4],[7,7,7,4],[0,0,1,0],[9,8,8,8],[3,2,4,2]],
+        [[6,4,5,4],[3,4,4,4],[9,1,7,2],[0,1,2,2],[9,7,7,6],[0,7,2,6],[7,1,7,4],[2,7,2,4]],
+
+        // 起马局、飞相局：稳健发展，避免早出车被追
+        [[9,1,7,2],[0,1,2,2],[7,1,7,4],[0,7,2,6],[6,6,5,6],[3,2,4,2],[9,2,7,4],[0,6,2,4]],
+        [[9,2,7,4],[0,1,2,2],[9,1,7,2],[2,1,2,4],[6,4,5,4],[3,4,4,4],[9,7,7,6],[0,7,2,6]],
+        [[9,6,7,4],[0,7,2,6],[9,7,7,6],[2,7,2,4],[6,4,5,4],[3,4,4,4],[7,7,7,4],[0,1,2,2]],
+
+        // 顺炮/列炮类：炮不过早冒进，先补马兵
+        [[7,1,7,4],[2,1,2,4],[9,1,7,2],[0,1,2,2],[6,2,5,2],[3,2,4,2],[9,7,7,6],[0,7,2,6]],
+        [[7,7,7,4],[2,7,2,4],[9,7,7,6],[0,7,2,6],[6,6,5,6],[3,6,4,6],[9,1,7,2],[0,1,2,2]]
       ];
-      for (const line of lines) addLineToLearnBook(line, 4.5);
+      for (const line of lines) addLineToLearnBook(line, 5.2);
       saveLearnBook();
       localStorage.setItem(SEED_KEY, "1");
     }
@@ -2356,6 +2732,7 @@
         let score = evaluateRelative(next, side);
         score += modelPolicyPrior(b, m, side) * 160;
         score += getLearnScoreForMove(b, side, m) * 90;
+        score += masterStyleMoveBonus(b, m, side) * 120;
         if (target) score += (baseValue[target.type] || 0) * 0.35;
         if (isInCheck(next, opposite(side))) score += 90;
         score -= landingSquareRisk(next, m.to.r, m.to.c, side) * 1.6;
@@ -2787,7 +3164,24 @@
       const landingRisk = landingSquareRisk(next, move.to.r, move.to.c, color);
       if (landingRisk > 0) score -= landingRisk * 2.15;
 
+      const severeRisk = severeBlunderScore(b, move, color);
+      if (severeRisk > 0) score -= severeRisk * 4.2;
+
+      if (target) {
+        const see = staticExchangeEval(b, move, color);
+        score += see * 2.4;
+        if (see < -120) score += see * 5.0;
+      }
+
+      score += masterStyleMoveBonus(b, move, color) * 160;
+
       if (ply === 0) {
+        if (findImmediateWinMove(b, color, [move])) score += MATE / 10;
+        if (allowsImmediateWin(b, move, color)) score -= MATE / 8;
+
+        const mateThreat = immediateWinThreatScore(next, color);
+        if (mateThreat > 0) score -= mateThreat;
+
         const beforeThreat = bestCaptureThreat(b, opposite(color));
         const afterThreat = bestCaptureThreat(next, opposite(color));
         const newThreat = afterThreat - Math.max(0, beforeThreat * 0.55);
