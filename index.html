@@ -495,10 +495,10 @@
     };
 
     const AI_LEVELS = {
-      1: { depth: 4, timeMs: 1000, maxQuiet: 26, randomNoise: 18 },
-      2: { depth: 7, timeMs: 5200, maxQuiet: 48, randomNoise: 2 },
-      3: { depth: 9, timeMs: 10500, maxQuiet: 68, randomNoise: 0 },
-      4: { depth: 11, timeMs: 24000, maxQuiet: 92, randomNoise: 0 }
+      1: { depth: 4, timeMs: 900, maxQuiet: 22, randomNoise: 18 },
+      2: { depth: 6, timeMs: 2800, maxQuiet: 36, randomNoise: 2 },
+      3: { depth: 7, timeMs: 4800, maxQuiet: 46, randomNoise: 0 },
+      4: { depth: 8, timeMs: 8200, maxQuiet: 58, randomNoise: 0 }
     };
 
     let board = createInitialBoard();
@@ -1013,7 +1013,7 @@
         aiThinking = false;
         if (move) makeRealMove(move);
         else render();
-      }, modeEl.value === "ai-vs-ai" ? 220 : 180);
+      }, modeEl.value === "ai-vs-ai" ? 220 : 260);
     }
 
 
@@ -1305,8 +1305,10 @@
       let moves = generateAllLegalMoves(b, side);
       if (moves.length === 0) return -MATE + ply;
 
-      const winMove = findImmediateWinMove(b, side, moves);
-      if (winMove) return MATE - ply;
+      if (depth >= 2 && ply <= 4) {
+        const winMove = findImmediateWinMove(b, side, moves);
+        if (winMove) return MATE - ply;
+      }
 
       const ttMove = cached ? cached.bestMove : null;
       moves = orderMoves(b, moves, side, aiColor, ply, ttMove);
@@ -1401,8 +1403,10 @@
       let moves = inCheck ? generateAllLegalMoves(b, side) : generateTacticalMoves(b, side);
       if (moves.length === 0) return inCheck ? -MATE + ply : standPat;
 
-      const winMove = findImmediateWinMove(b, side, moves);
-      if (winMove) return MATE - ply;
+      if (inCheck || qDepth <= 1) {
+        const winMove = findImmediateWinMove(b, side, moves);
+        if (winMove) return MATE - ply;
+      }
 
       moves = orderMoves(b, moves, side, side, ply, null);
 
@@ -2100,20 +2104,27 @@
 
       const next = applyMoveToClone(b, move);
       const enemy = opposite(color);
+      const givesCheck = isInCheck(next, enemy);
+      const enemyMoves = givesCheck ? generateAllLegalMoves(next, enemy) : null;
 
       // 立即胜着不是送子。
       if (target && target.type === "k") return -MATE / 2;
-      if (generateAllLegalMoves(next, enemy).length === 0) return -MATE / 2;
-      if (isInCheck(next, enemy) && generateAllLegalMoves(next, enemy).length <= 1) return -2000;
+      if (enemyMoves && enemyMoves.length === 0) return -MATE / 2;
+      if (givesCheck && enemyMoves && enemyMoves.length <= 1) return -2000;
 
+      // 只在根节点/安全闸门调用时检查对方一步杀，这里已由 findImmediateWinMove 的轻量版完成。
       if (findImmediateWinMove(next, enemy)) return MATE / 5;
 
-      const compensation = moveCompensationScore(b, move, color, next, target, isInCheck(next, enemy), generateAllLegalMoves(next, enemy).length);
+      const compensation = moveCompensationScore(b, move, color, next, target, givesCheck, enemyMoves ? enemyMoves.length : 8);
       const landing = landingSquareRisk(next, move.to.r, move.to.c, color);
       const exposed = exposedMajorPieceRisk(b, next, color);
-      const punish = opponentPunishScore(next, enemy) - Math.max(0, opponentPunishScore(b, enemy) * 0.28);
 
-      // SEE：如果这步是吃子但交换后亏很多，也算风险。
+      // 对方惩罚分较重，只在确有明显落点/暴露风险时再计算，避免无意义耗时。
+      let punish = 0;
+      if (landing > 120 || exposed > 160 || target) {
+        punish = opponentPunishScore(next, enemy) - Math.max(0, opponentPunishScore(b, enemy) * 0.28);
+      }
+
       const see = target ? staticExchangeEval(b, move, color) : 0;
       const badExchange = see < -120 ? -see : 0;
 
@@ -2123,7 +2134,6 @@
       risk = Math.max(risk, punish - compensation * 0.85);
       risk = Math.max(risk, badExchange - compensation * 0.60);
 
-      // 大子非必要落入敌方攻击，额外提升风险。
       if (["r", "c", "n"].includes(p.type) && !target && landing > 220) risk += 180;
 
       return Math.max(0, risk);
@@ -2327,19 +2337,14 @@
       for (const move of legalMoves) {
         const captured = b[move.to.r][move.to.c];
         if (captured && captured.type === "k") return move;
-
-        const next = applyMoveToClone(b, move);
-        const enemyMoves = generateAllLegalMoves(next, enemy);
-
-        // 中国象棋里无合法着法即负；如果这步让对方无路可走，直接走。
-        if (enemyMoves.length === 0) return move;
       }
 
-      // 再找强制将军：对方只有 0~1 个应法，通常是强制杀法起点。
       let best = null;
       let bestScore = -INF;
       for (const move of legalMoves) {
         const next = applyMoveToClone(b, move);
+
+        // 普通不将军的招一般不可能构成“一步杀”，不要为每一步都生成对方合法着法。
         if (!isInCheck(next, enemy)) continue;
 
         const replies = generateAllLegalMoves(next, enemy);
@@ -3128,7 +3133,10 @@
     }
 
     function orderMoves(b, moves, color, aiColor = color, ply = 0, ttMove = null) {
-      return [...moves].sort((a, z) => moveScore(b, z, color, aiColor, ply, ttMove) - moveScore(b, a, color, aiColor, ply, ttMove));
+      return moves
+        .map(move => ({ move, score: moveScore(b, move, color, aiColor, ply, ttMove) }))
+        .sort((a, z) => z.score - a.score)
+        .map(item => item.move);
     }
 
     function moveScore(b, move, color, aiColor, ply, ttMove) {
@@ -3164,7 +3172,7 @@
       const landingRisk = landingSquareRisk(next, move.to.r, move.to.c, color);
       if (landingRisk > 0) score -= landingRisk * 2.15;
 
-      const severeRisk = severeBlunderScore(b, move, color);
+      const severeRisk = ply <= 1 ? severeBlunderScore(b, move, color) : 0;
       if (severeRisk > 0) score -= severeRisk * 4.2;
 
       if (target) {
