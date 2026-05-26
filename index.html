@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>中国象棋 AI Pro Max｜强棋版｜真实长打规则版</title>
+  <title>中国象棋</title>
   <style>
     :root {
       --line: #5b2f12;
@@ -41,26 +41,44 @@
 
     .panel {
       background: var(--panel);
-      border: 2px solid rgba(91, 47, 18, 0.28);
+      border: 1px solid rgba(91, 47, 18, 0.22);
       border-radius: 18px;
       padding: 16px;
-      box-shadow: 0 18px 45px rgba(91, 47, 18, 0.25);
+      box-shadow: 0 18px 45px rgba(91, 47, 18, 0.22);
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
     }
 
     h1 {
-      margin: 0 0 10px;
-      font-size: 26px;
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0.04em;
+    }
+
+    .badge {
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: rgba(123, 63, 22, 0.12);
+      color: #7b3f16;
+      font-size: 12px;
+      font-weight: 800;
     }
 
     .status {
-      height: 88px;
-      min-height: 88px;
-      overflow: auto;
+      height: 62px;
+      min-height: 62px;
+      overflow: hidden;
       margin: 8px 0 14px;
-      padding: 12px;
+      padding: 11px 12px;
       border-radius: 14px;
-      background: rgba(255, 255, 255, 0.67);
-      line-height: 1.55;
+      background: rgba(255, 255, 255, 0.7);
+      line-height: 1.45;
       font-weight: 700;
     }
 
@@ -68,19 +86,32 @@
     .black { color: var(--black); }
 
     .buttons, .settings {
-      display: flex;
+      display: grid;
       gap: 10px;
-      flex-wrap: wrap;
       margin-bottom: 12px;
     }
 
+    .settings {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .main-actions {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    .advanced-actions {
+      grid-template-columns: 1fr 1fr;
+      margin-top: 10px;
+    }
+
     button, select {
+      width: 100%;
       border: none;
       border-radius: 12px;
-      padding: 10px 12px;
+      padding: 10px 11px;
       font-size: 14px;
       font-weight: 700;
-      box-shadow: 0 6px 14px rgba(91, 47, 18, 0.18);
+      box-shadow: 0 6px 14px rgba(91, 47, 18, 0.15);
     }
 
     button {
@@ -97,8 +128,7 @@
     select {
       background: #fff8e8;
       color: #29170a;
-      border: 1px solid rgba(91, 47, 18, 0.28);
-      max-width: 190px;
+      border: 1px solid rgba(91, 47, 18, 0.22);
     }
 
     .label {
@@ -108,11 +138,20 @@
       font-weight: 700;
     }
 
-    .tips {
-      margin: 0;
-      padding-left: 18px;
-      line-height: 1.8;
+    .advanced {
+      margin: 6px 0 12px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.42);
+      border: 1px solid rgba(91, 47, 18, 0.14);
+      padding: 0 12px;
+    }
+
+    .advanced summary {
+      cursor: pointer;
+      padding: 11px 0;
       font-size: 14px;
+      font-weight: 800;
+      list-style-position: outside;
     }
 
     .meter {
@@ -121,6 +160,13 @@
       margin: 10px 0 12px;
       font-size: 13px;
       font-weight: 700;
+    }
+
+    .move-title {
+      margin: 10px 0 6px;
+      font-size: 13px;
+      font-weight: 800;
+      opacity: 0.82;
     }
 
     .meter-bar {
@@ -167,12 +213,22 @@
     .v-line.river-gap { bottom: auto; }
     .v-line.river-gap.bottom { top: auto; }
 
-    .diag {
+    .palace-svg {
       position: absolute;
-      height: 2px;
-      background: var(--line);
-      transform-origin: left center;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 1;
+      overflow: visible;
+    }
+
+    .palace-line {
+      stroke: var(--line);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
       opacity: 0.9;
+      stroke-linecap: square;
     }
 
     .river {
@@ -199,6 +255,7 @@
 
     .cell {
       position: absolute;
+      z-index: 2;
       width: 9.8%;
       aspect-ratio: 1;
       border-radius: 50%;
@@ -255,9 +312,9 @@
     }
 
     .move-list {
-      margin-top: 12px;
-      height: 230px;
-      max-height: 230px;
+      margin-top: 0;
+      height: 190px;
+      max-height: 190px;
       overflow: auto;
       padding-right: 6px;
       font-size: 13px;
@@ -271,6 +328,29 @@
       border-bottom: 1px dashed rgba(91, 47, 18, 0.22);
     }
 
+    .round-row {
+      display: grid;
+      grid-template-columns: 34px 1fr 1fr;
+      align-items: center;
+      gap: 8px;
+      min-height: 30px;
+    }
+
+    .round-no {
+      opacity: 0.65;
+      font-weight: 800;
+    }
+
+    .round-move {
+      font-family: "KaiTi", "STKaiti", "Microsoft YaHei", serif;
+      font-size: 15px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .red-move { color: var(--red); }
+    .black-move { color: var(--black); }
+
     .small {
       font-size: 12px;
       opacity: 0.82;
@@ -281,6 +361,12 @@
       .app { grid-template-columns: 1fr; }
       .panel { order: 2; }
     }
+
+    @media (max-width: 420px) {
+      .settings, .main-actions, .advanced-actions {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -290,59 +376,61 @@
     </section>
 
     <aside class="panel">
-      <h1>中国象棋 AI Pro Max｜真实长打规则版</h1>
+      <div class="title-row">
+        <h1>中国象棋</h1>
+        <span class="badge">AI</span>
+      </div>
+
       <div id="status" class="status"></div>
 
       <div class="settings">
         <label class="label">模式
           <select id="mode">
-            <option value="human-red">人机：我执红</option>
-            <option value="human-black">人机：我执黑</option>
-            <option value="two-player">双人对弈</option>
-            <option value="ai-vs-ai">AI 自战演示</option>
+            <option value="human-red">我执红</option>
+            <option value="human-black">我执黑</option>
+            <option value="two-player">双人</option>
+            <option value="ai-vs-ai">AI 自战</option>
           </select>
         </label>
 
-        <label class="label">AI 难度
+        <label class="label">难度
           <select id="difficulty">
-            <option value="1">简单：3 层</option>
-            <option value="2">普通：6 层</option>
-            <option value="3" selected>困难：9 层限时</option>
-            <option value="4">大师：11 层强搜</option>
+            <option value="1">简单</option>
+            <option value="2">普通</option>
+            <option value="3" selected>困难</option>
+            <option value="4">大师</option>
           </select>
         </label>
       </div>
 
-      <div class="buttons">
+      <div class="buttons main-actions">
         <button id="restart">重新开始</button>
-        <button id="flip" class="secondary">翻转棋盘</button>
-        <button id="undo" class="secondary">悔一步</button>
-        <button id="train">训练 20 局</button>
-        <button id="trainDeep" class="secondary">深度训练 100 局</button>
-        <button id="importBtn" class="secondary">导入棋谱训练</button>
-        <input id="importFile" type="file" accept=".txt,.csv,.json" style="display:none" />
-        <button id="clearLearn" class="danger">清空训练</button>
-        <button id="exportLearn" class="secondary">导出训练数据</button>
-        <button id="importJsonBtn" class="secondary">导入训练 JSON</button>
-        <button id="loadSiteLearn" class="secondary">加载网站训练库</button>
-        <input id="importJsonFile" type="file" accept=".json,application/json" style="display:none" />
+        <button id="flip" class="secondary">翻转</button>
+        <button id="undo" class="secondary">悔棋</button>
       </div>
 
-      <div class="meter">
-        <div id="trainText">本地训练：0 条经验</div>
-        <div class="meter-bar"><div id="trainFill" class="meter-fill"></div></div>
-      </div>
+      <details class="advanced">
+        <summary>训练与数据</summary>
 
-      <ul class="tips">
-        <li>AI 使用强化开局库、PVS/Alpha-Beta、置换表、静态搜索、杀棋延伸、重要吃子延伸和更强局面评估。</li>
-        <li>“深度训练 100 局”会在本机自我对弈，并把结果保存到浏览器 localStorage。</li>
-        <li>可导入坐标棋谱训练，例如：B8-E8 B1-C3 H10-G8。</li>
-      </ul>
+        <div class="buttons advanced-actions">
+          <button id="train">训练 20 局</button>
+          <button id="trainDeep" class="secondary">训练 100 局</button>
+          <button id="importBtn" class="secondary">导入棋谱</button>
+          <input id="importFile" type="file" accept=".txt,.csv,.json" style="display:none" />
+          <button id="exportLearn" class="secondary">导出数据</button>
+          <button id="importJsonBtn" class="secondary">导入数据</button>
+          <button id="loadSiteLearn" class="secondary">加载网站库</button>
+          <button id="clearLearn" class="danger">清空</button>
+          <input id="importJsonFile" type="file" accept=".json,application/json" style="display:none" />
+        </div>
 
-      <p class="small">
-        注意：这是浏览器单文件 AI，不等于专业象棋引擎。真正大师级通常需要百万级棋谱、残局库、UCCI 引擎或神经网络评估。
-      </p>
+        <div class="meter">
+          <div id="trainText">训练经验：0</div>
+          <div class="meter-bar"><div id="trainFill" class="meter-fill"></div></div>
+        </div>
+      </details>
 
+      <div class="move-title">棋谱</div>
       <div id="moves" class="move-list"></div>
     </aside>
   </main>
@@ -355,6 +443,7 @@
     const LEARN_KEY = "xiangqi_ai_pro_learning_v3";
     const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v3";
     const SITE_TRAINING_URL = "training-data.json";
+    const MODEL_KEY = "xiangqi_ai_policy_value_model_v1";
 
     const boardEl = document.getElementById("board");
     const statusEl = document.getElementById("status");
@@ -432,6 +521,7 @@
     let training = false;
 
     let learnBook = loadLearnBook();
+    let aiModel = loadAiModel();
     let tt = new Map();
     let killerMoves = Array.from({ length: 96 }, () => []);
     let historyHeuristic = new Map();
@@ -507,18 +597,24 @@
     }
 
     function drawDiag(r1, c1, r2, c2) {
-      const x1 = colX(c1), y1 = rowY(r1);
-      const x2 = colX(c2), y2 = rowY(r2);
-      const dx = x2 - x1, dy = y2 - y1;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      const line = document.createElement("div");
-      line.className = "diag";
-      line.style.left = `${x1}%`;
-      line.style.top = `${y1}%`;
-      line.style.width = `${len}%`;
-      line.style.transform = `rotate(${angle}deg)`;
-      boardEl.appendChild(line);
+      const svgNS = "http://www.w3.org/2000/svg";
+
+      let svg = boardEl.querySelector(".palace-svg");
+      if (!svg) {
+        svg = document.createElementNS(svgNS, "svg");
+        svg.classList.add("palace-svg");
+        svg.setAttribute("viewBox", "0 0 100 100");
+        svg.setAttribute("preserveAspectRatio", "none");
+        boardEl.appendChild(svg);
+      }
+
+      const line = document.createElementNS(svgNS, "line");
+      line.classList.add("palace-line");
+      line.setAttribute("x1", colX(c1));
+      line.setAttribute("y1", rowY(r1));
+      line.setAttribute("x2", colX(c2));
+      line.setAttribute("y2", rowY(r2));
+      svg.appendChild(line);
     }
 
     function drawRiverText() {
@@ -623,6 +719,8 @@
       const beforeRuleKey = repetitionKey(board, turn);
       if (!piece) return;
 
+      const chineseRecordText = formatChineseMove(board, fr, fc, tr, tc, captured);
+
       history.push({
         board: cloneBoard(board),
         turn,
@@ -639,7 +737,7 @@
         records: [...moveRecords],
         pos: [...positionHistory]
       });
-      positionHistory.push({ key: learningKey(board, turn), move: moveKey(move), color: piece.color });
+      positionHistory.push({ key: learningKey(board, turn), move: moveKey(move), color: piece.color, features: extractModelFeatures(board, piece.color) });
 
       board[tr][tc] = piece;
       board[fr][fc] = null;
@@ -647,8 +745,7 @@
       selected = null;
       legalTargets = [];
 
-      const recordText = `${piece.color === "red" ? "红" : "黑"}${pieceName[piece.type]} ${coordText(fr, fc)} → ${coordText(tr, tc)}${captured ? ` 吃${pieceName[captured.type]}` : ""}`;
-      moveRecords.push(recordText);
+      moveRecords.push(chineseRecordText);
 
       const progressMove = isProgressMove(piece, fr, fc, tr, tc, captured);
 
@@ -904,19 +1001,24 @@
     }
 
     function chooseAiMove(b, aiColor, difficulty) {
-      const moves = generateAllLegalMoves(b, aiColor);
+      let moves = generateAllLegalMoves(b, aiColor);
       if (moves.length === 0) return null;
 
       const profile = AI_LEVELS[difficulty] || AI_LEVELS[3];
+
+      // 根节点先过滤明显送大子的招法。若全都危险，才保留原招。
+      moves = filterObviousBlunders(b, moves, aiColor);
 
       const tacticalShot = findImmediateTacticalMove(b, aiColor, moves);
       if (tacticalShot) return tacticalShot;
 
       const bookMove = chooseOpeningBookMove(b, aiColor, moves);
-      if (bookMove && moveRecords.length < 10) return bookMove;
+      // 开局库只在最开始几手使用，且必须通过安全检查；后面交给搜索，避免机械走谱送大子。
+      if (bookMove && moveRecords.length < 4 && !isObviousBlunder(b, bookMove, aiColor)) return bookMove;
 
       const learnedMove = chooseLearnedMove(b, aiColor, moves);
-      if (learnedMove && moveRecords.length < 20 && Math.random() < 0.75) return learnedMove;
+      // 经验招也必须安全；困难/大师更相信搜索，不盲走经验表。
+      if (learnedMove && difficulty <= 2 && moveRecords.length < 16 && Math.random() < 0.55 && !isObviousBlunder(b, learnedMove, aiColor)) return learnedMove;
 
       tt.clear();
       killerMoves = Array.from({ length: 96 }, () => []);
@@ -976,6 +1078,12 @@
       if (profile.randomNoise > 0 && Math.random() * 100 < profile.randomNoise) {
         const good = orderMoves(b, moves, aiColor, aiColor, 0, bestMove).slice(0, Math.min(4, moves.length));
         return good[Math.floor(Math.random() * good.length)];
+      }
+
+      if (isObviousBlunder(b, bestMove, aiColor)) {
+        const fallback = orderMoves(b, moves, aiColor, aiColor, 0, bestMove)
+          .find(m => !isObviousBlunder(b, m, aiColor));
+        if (fallback) bestMove = fallback;
       }
 
       console.log("AI nodes:", nodes, "score:", bestScore, "move:", moveKey(bestMove));
@@ -1185,6 +1293,7 @@
       score += attackPressure(b, color);
       score += formationBonus(b, color);
       score += advancedStructureBonus(b, color, phase);
+      score += modelValueBonus(b, color);
       score += learnedPositionBonus(b, color);
 
       if (isInCheck(b, color)) score -= 120;
@@ -1302,17 +1411,26 @@
       if (!p || p.type === "k") return 0;
 
       const enemy = opposite(color);
-      const attacked = isSquareAttacked(b, r, c, enemy);
-      const defended = isSquareAttacked(b, r, c, color, true);
+      const lowestEnemy = lowestAttackerValue(b, r, c, enemy);
+      if (!Number.isFinite(lowestEnemy)) {
+        return isSquareAttacked(b, r, c, color, true) ? 12 : 0;
+      }
 
-      if (!attacked) return defended ? 12 : 0;
+      const lowestDefender = lowestAttackerValue(b, r, c, color, true);
+      const defended = Number.isFinite(lowestDefender);
+      const value = baseValue[p.type] || 0;
 
-      let penalty = Math.min(420, baseValue[p.type] * 0.36);
-      if (defended) penalty *= 0.42;
+      let penalty = Math.max(80, value - lowestEnemy * 0.45);
+      penalty = Math.min(620, penalty);
 
-      // 低价值子被攻击不要过度恐慌
-      if (p.type === "p") penalty *= 0.45;
-      if (p.type === "a" || p.type === "b") penalty *= 0.70;
+      if (defended) penalty *= 0.48;
+      if (p.type === "p") penalty *= 0.38;
+      if (p.type === "a" || p.type === "b") penalty *= 0.66;
+
+      // 大子被小子攻击且保护不足，必须重罚，避免明显送车送炮送马。
+      if (["r", "c", "n"].includes(p.type) && lowestEnemy <= 250 && !defended) {
+        penalty += value * 0.45;
+      }
 
       return -penalty;
     }
@@ -1524,6 +1642,254 @@
       return Math.min(score, 180);
     }
 
+
+    function defaultAiModel() {
+      return {
+        version: 1,
+        games: 0,
+        lr: 0.035,
+        weights: {
+          material: 0.22,
+          mobility: 0.09,
+          safety: 0.16,
+          attack: 0.14,
+          king: 0.12,
+          pawn: 0.10,
+          line: 0.10,
+          center: 0.05,
+          phase: 0.02
+        },
+        policy: {
+          capture: 0.22,
+          check: 0.18,
+          threat: 0.15,
+          safe: 0.20,
+          develop: 0.10,
+          center: 0.08,
+          pawnAdvance: 0.05
+        }
+      };
+    }
+
+    function loadAiModel() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(MODEL_KEY) || "null");
+        const base = defaultAiModel();
+        if (!saved || typeof saved !== "object") return base;
+        return {
+          ...base,
+          ...saved,
+          weights: { ...base.weights, ...(saved.weights || {}) },
+          policy: { ...base.policy, ...(saved.policy || {}) }
+        };
+      } catch {
+        return defaultAiModel();
+      }
+    }
+
+    function saveAiModel() {
+      try {
+        localStorage.setItem(MODEL_KEY, JSON.stringify(aiModel));
+      } catch {}
+    }
+
+    function extractModelFeatures(b, color) {
+      const enemy = opposite(color);
+      const phase = gamePhase(b);
+      const material = materialScore(b, color) - materialScore(b, enemy);
+      const mobility = sideMobilityScore(b, color) - sideMobilityScore(b, enemy);
+      const safety = sideSafetyScore(b, color) - sideSafetyScore(b, enemy);
+      const attack = attackPressure(b, color) - attackPressure(b, enemy);
+      const king = kingSafetyFeature(b, color) - kingSafetyFeature(b, enemy);
+      const pawn = pawnFeature(b, color) - pawnFeature(b, enemy);
+      const line = lineFeature(b, color) - lineFeature(b, enemy);
+      const center = centerControlFeature(b, color) - centerControlFeature(b, enemy);
+
+      return {
+        material: clampFeature(material / 2200),
+        mobility: clampFeature(mobility / 120),
+        safety: clampFeature(safety / 1000),
+        attack: clampFeature(attack / 900),
+        king: clampFeature(king / 500),
+        pawn: clampFeature(pawn / 360),
+        line: clampFeature(line / 450),
+        center: clampFeature(center / 120),
+        phase: clampFeature((phase - 0.5) * 2)
+      };
+    }
+
+    function clampFeature(x) {
+      if (!Number.isFinite(x)) return 0;
+      return Math.max(-1, Math.min(1, x));
+    }
+
+    function materialScore(b, color) {
+      let score = 0;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (p && p.color === color && p.type !== "k") score += baseValue[p.type] || 0;
+        }
+      }
+      return score;
+    }
+
+    function sideMobilityScore(b, color) {
+      let score = 0;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color) continue;
+          score += getPseudoMoves(b, r, c).length * (mobilityWeight[p.type] || 1);
+        }
+      }
+      return score;
+    }
+
+    function sideSafetyScore(b, color) {
+      let score = 0;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (p && p.color === color) score += pieceSafety(b, r, c, color);
+        }
+      }
+      return score;
+    }
+
+    function kingSafetyFeature(b, color) {
+      let advisors = 0;
+      let elephants = 0;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color) continue;
+          if (p.type === "a") advisors++;
+          if (p.type === "b") elephants++;
+        }
+      }
+      return kingSafety(b, color, advisors, elephants);
+    }
+
+    function pawnFeature(b, color) {
+      let score = 0;
+      const enemyKing = findKing(b, opposite(color));
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== color || p.type !== "p") continue;
+          const advance = color === "red" ? 9 - r : r;
+          score += advance * 12 + (hasCrossedRiver(color, r) ? 55 : 0);
+          if (enemyKing) {
+            const dist = Math.abs(r - enemyKing.r) + Math.abs(c - enemyKing.c);
+            score += Math.max(0, 45 - dist * 7);
+          }
+        }
+      }
+      return score;
+    }
+
+    function lineFeature(b, color) {
+      const enemyKing = findKing(b, opposite(color));
+      return enemyKing ? lineAttackToKingBonus(b, color, enemyKing) : 0;
+    }
+
+    function centerControlFeature(b, color) {
+      let score = 0;
+      const points = [[4,4], [5,4], [4,3], [4,5], [5,3], [5,5]];
+      for (const [r, c] of points) {
+        if (isSquareAttacked(b, r, c, color)) score += 15;
+      }
+      return score;
+    }
+
+    function modelValueBonus(b, color) {
+      const f = extractModelFeatures(b, color);
+      let value = 0;
+      for (const [name, x] of Object.entries(f)) {
+        value += (aiModel.weights[name] || 0) * x;
+      }
+      return value * 420;
+    }
+
+    function modelPolicyPrior(b, move, color) {
+      const p = b[move.from.r][move.from.c];
+      if (!p) return 0;
+      const target = b[move.to.r][move.to.c];
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+      const pol = aiModel.policy;
+
+      let score = 0;
+      if (target) score += (pol.capture || 0) * Math.min(1, (baseValue[target.type] || 0) / 1000);
+      if (isInCheck(next, enemy)) score += pol.check || 0;
+      if (createsBigThreat(next, move.to.r, move.to.c, color)) score += pol.threat || 0;
+
+      const risk = landingSquareRisk(next, move.to.r, move.to.c, color);
+      score += (pol.safe || 0) * (risk <= 0 ? 1 : -Math.min(1, risk / 900));
+
+      if (["n", "c"].includes(p.type) && !hasCrossedRiver(color, move.from.r)) score += pol.develop || 0;
+      if ([3, 4, 5].includes(move.to.c)) score += pol.center || 0;
+      if (p.type === "p" && hasCrossedRiver(color, move.to.r)) score += pol.pawnAdvance || 0;
+
+      return score;
+    }
+
+    function trainAiModelFromHistory(hist, winner) {
+      if (!hist || !hist.length) return;
+      const lr = aiModel.lr || 0.03;
+
+      for (let i = 0; i < hist.length; i++) {
+        const item = hist[i];
+        if (!item.features) continue;
+
+        const result = winner ? (item.color === winner ? 1 : -1) : 0;
+        const decay = Math.max(0.25, 1 - i / Math.max(60, hist.length * 1.6));
+        const prediction = predictFromFeatures(item.features);
+        const error = (result - prediction) * decay;
+
+        for (const [name, x] of Object.entries(item.features)) {
+          aiModel.weights[name] = clampWeight((aiModel.weights[name] || 0) + lr * error * x);
+        }
+
+        // 赢棋方的实际着法会轻微增强策略先验；输棋方会减弱。
+        const direction = result * decay * lr * 0.45;
+        if (direction !== 0) {
+          tunePolicyFromMoveKey(item.move, direction);
+        }
+      }
+
+      aiModel.games = (aiModel.games || 0) + 1;
+      saveAiModel();
+    }
+
+    function predictFromFeatures(features) {
+      let s = 0;
+      for (const [name, x] of Object.entries(features)) {
+        s += (aiModel.weights[name] || 0) * x;
+      }
+      return Math.tanh(s);
+    }
+
+    function clampWeight(x) {
+      return Math.max(-1.5, Math.min(1.5, x));
+    }
+
+    function tunePolicyFromMoveKey(moveKeyText, delta) {
+      // 只根据走法形态做轻量调参，避免模型过拟合单一局面。
+      if (!moveKeyText || moveKeyText.length < 4) return;
+      const fr = Number(moveKeyText[0]);
+      const fc = Number(moveKeyText[1]);
+      const tr = Number(moveKeyText[2]);
+      const tc = Number(moveKeyText[3]);
+      if (![fr, fc, tr, tc].every(Number.isFinite)) return;
+
+      const forwardLike = Math.abs(tr - fr) + Math.abs(tc - fc);
+      aiModel.policy.center = clampWeight((aiModel.policy.center || 0) + delta * ([3,4,5].includes(tc) ? 0.45 : -0.08));
+      aiModel.policy.develop = clampWeight((aiModel.policy.develop || 0) + delta * (forwardLike >= 1 ? 0.18 : 0));
+      aiModel.policy.safe = clampWeight((aiModel.policy.safe || 0) + delta * 0.10);
+    }
+
     function learnedPositionBonus(b, color) {
       const key = learningKey(b, color);
       const bucket = learnBook[key];
@@ -1533,6 +1899,157 @@
       return Math.max(-120, Math.min(120, best * 18));
     }
 
+
+
+    function filterObviousBlunders(b, moves, color) {
+      const safe = [];
+      for (const move of moves) {
+        if (!isObviousBlunder(b, move, color)) safe.push(move);
+      }
+      return safe.length ? safe : moves;
+    }
+
+    function isObviousBlunder(b, move, color) {
+      const moving = b[move.from.r][move.from.c];
+      const captured = b[move.to.r][move.to.c];
+      if (!moving) return false;
+
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+
+      // 杀棋、吃将、直接困毙不是送子。
+      if (captured && captured.type === "k") return false;
+      const enemyMoves = generateAllLegalMoves(next, enemy);
+      if (enemyMoves.length === 0) return false;
+
+      const givesCheck = isInCheck(next, enemy);
+      const compensation = moveCompensationScore(b, move, color, next, captured, givesCheck, enemyMoves.length);
+
+      // 对方当前已经有的最佳吃子威胁，与走完后的最佳吃子威胁对比。
+      const beforePunish = opponentPunishScore(b, enemy);
+      const afterPunish = opponentPunishScore(next, enemy);
+      const newPunish = afterPunish - Math.max(0, beforePunish * 0.35);
+
+      // 刚走的棋子落点是否直接被低价子攻击。
+      const landingRisk = landingSquareRisk(next, move.to.r, move.to.c, color);
+
+      // 是否因为这步棋让己方其它大子变成可白吃。
+      const exposedRisk = exposedMajorPieceRisk(b, next, color);
+
+      if (moving.type === "r" && moveRecords.length < 10 && !captured && !givesCheck && landingRisk > 120) return true;
+      if (landingRisk >= 300 && compensation < landingRisk * 0.95) return true;
+      if (newPunish >= 360 && compensation < newPunish * 0.85) return true;
+      if (exposedRisk >= 420 && compensation < exposedRisk * 0.80) return true;
+
+      return false;
+    }
+
+    function moveCompensationScore(b, move, color, next, captured, givesCheck, enemyMoveCount) {
+      let score = 0;
+      if (captured) score += baseValue[captured.type] || 0;
+      if (givesCheck) score += enemyMoveCount <= 2 ? 520 : 220;
+      if (createsBigThreat(next, move.to.r, move.to.c, color)) score += 260;
+
+      // 如果这步后我方也能制造更大的吃子威胁，给一点补偿。
+      score += Math.max(0, bestCaptureThreat(next, color) * 0.45);
+      return score;
+    }
+
+    function opponentPunishScore(b, attackerColor) {
+      let best = 0;
+      const moves = generateAllLegalMoves(b, attackerColor);
+
+      for (const m of moves) {
+        const target = b[m.to.r][m.to.c];
+        if (!target || target.type === "k") continue;
+
+        let gain = captureStaticGain(b, m, attackerColor);
+        if (["r", "c", "n"].includes(target.type)) gain += 140;
+        if (isInCheck(applyMoveToClone(b, m), opposite(attackerColor))) gain += 90;
+
+        if (gain > best) best = gain;
+      }
+
+      return best;
+    }
+
+    function exposedMajorPieceRisk(before, after, color) {
+      let risk = 0;
+      const enemy = opposite(color);
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = after[r][c];
+          if (!p || p.color !== color || !["r", "c", "n"].includes(p.type)) continue;
+
+          const beforeP = before[r][c];
+          const wasSamePiece = beforeP && beforeP.color === p.color && beforeP.type === p.type;
+          const beforeRisk = wasSamePiece ? landingSquareRisk(before, r, c, color) : 0;
+          const afterRisk = landingSquareRisk(after, r, c, color);
+          risk = Math.max(risk, afterRisk - beforeRisk * 0.4);
+        }
+      }
+
+      return risk;
+    }
+
+    function bestCaptureThreat(b, attackerColor) {
+      let best = 0;
+      const moves = generateAllLegalMoves(b, attackerColor);
+
+      for (const m of moves) {
+        const target = b[m.to.r][m.to.c];
+        if (!target) continue;
+        const gain = captureStaticGain(b, m, attackerColor);
+        if (gain > best) best = gain;
+      }
+
+      return best;
+    }
+
+    function landingSquareRisk(b, r, c, color) {
+      const p = b[r][c];
+      if (!p || p.color !== color || p.type === "k") return 0;
+
+      const enemy = opposite(color);
+      const lowestEnemy = lowestAttackerValue(b, r, c, enemy);
+      if (!Number.isFinite(lowestEnemy)) return 0;
+
+      const lowestDefender = lowestAttackerValue(b, r, c, color, true);
+      const pieceValue = baseValue[p.type] || 0;
+
+      let risk = pieceValue - lowestEnemy * 0.35;
+
+      if (Number.isFinite(lowestDefender)) {
+        // 有保护也不代表安全：大子被小子攻击仍然危险。
+        risk *= lowestDefender <= lowestEnemy ? 0.45 : 0.65;
+      }
+
+      if (p.type === "r") risk *= 1.18;
+      if (p.type === "c" || p.type === "n") risk *= 1.08;
+      if (p.type === "p") risk *= 0.35;
+      if (p.type === "a" || p.type === "b") risk *= 0.60;
+
+      return Math.max(0, risk);
+    }
+
+    function lowestAttackerValue(b, tr, tc, byColor, includeOwnTarget = false) {
+      let best = Infinity;
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          if (r === tr && c === tc) continue;
+          const p = b[r][c];
+          if (!p || p.color !== byColor) continue;
+          if (!includeOwnTarget && b[tr][tc] && b[tr][tc].color === byColor) continue;
+          if (attacksSquareFrom(b, r, c, tr, tc)) {
+            best = Math.min(best, baseValue[p.type] || 0);
+          }
+        }
+      }
+
+      return best;
+    }
 
     function findImmediateTacticalMove(b, color, moves) {
       // 先找一步杀、一步困毙、明显白吃大子的机会，避免开局库或经验表错过战术。
@@ -1574,15 +2091,24 @@
       if (!moving || !captured) return 0;
 
       const next = applyMoveToClone(b, move);
-      const attacked = isSquareAttacked(next, move.to.r, move.to.c, opposite(color));
+      const enemy = opposite(color);
+      const attacked = isSquareAttacked(next, move.to.r, move.to.c, enemy);
       const defended = isSquareAttacked(next, move.to.r, move.to.c, color, true);
+      const lowestEnemy = lowestAttackerValue(next, move.to.r, move.to.c, enemy);
 
-      let gain = baseValue[captured.type] - baseValue[moving.type] * 0.08;
-      if (attacked && !defended) gain -= baseValue[moving.type] * 0.95;
-      else if (attacked) gain -= baseValue[moving.type] * 0.28;
+      let gain = baseValue[captured.type] - baseValue[moving.type] * 0.06;
+
+      if (attacked) {
+        const recaptureCost = Number.isFinite(lowestEnemy)
+          ? Math.max(0, baseValue[moving.type] - lowestEnemy * 0.35)
+          : baseValue[moving.type] * 0.65;
+
+        if (!defended) gain -= recaptureCost;
+        else gain -= recaptureCost * 0.38;
+      }
 
       // 将军吃子、吃未保护大子加分。
-      if (isInCheck(next, opposite(color))) gain += 260;
+      if (isInCheck(next, enemy)) gain += 260;
       if (!isSquareAttacked(b, move.to.r, move.to.c, captured.color, true)) gain += 80;
 
       return gain;
@@ -1610,7 +2136,10 @@
       for (let i = 0; i < cap; i++) {
         const raw = book[i];
         const move = { from: { r: raw[0], c: raw[1] }, to: { r: raw[2], c: raw[3] } };
-        if (legalMoves.some(m => sameMove(m, move))) candidates.push(move);
+        const p = b[move.from.r][move.from.c];
+        // 早期不再让开局库强行动车，避免出现“车1进1”这类机械软招或送子。
+        if (p && p.type === "r" && turnNo < 8) continue;
+        if (legalMoves.some(m => sameMove(m, move)) && !isObviousBlunder(b, move, color)) candidates.push(move);
       }
 
       if (!candidates.length) return null;
@@ -1683,6 +2212,7 @@
         learnBook[item.key][item.move] = Math.max(-20, Math.min(20, learnBook[item.key][item.move]));
       }
 
+      trainAiModelFromHistory(positionHistory, winner);
       saveLearnBook();
     }
 
@@ -1720,7 +2250,7 @@
           const move = chooseTrainingMove(tb, side, ply);
           const moving = tb[move.from.r][move.from.c];
           const captured = tb[move.to.r][move.to.c];
-          localHistory.push({ key: learningKey(tb, side), move: moveKey(move), color: side });
+          localHistory.push({ key: learningKey(tb, side), move: moveKey(move), color: side, features: extractModelFeatures(tb, side) });
 
           tb = applyMoveToClone(tb, move);
           const progressed = isProgressMove(moving, move.from.r, move.from.c, move.to.r, move.to.c, captured);
@@ -1745,7 +2275,7 @@
         else draws++;
 
         learnFromSelfPlayHistory(localHistory, winner);
-        trainTextEl.textContent = `训练中：${g}/${games} 局，红胜 ${redWins}，黑胜 ${blackWins}，和 ${draws}`;
+        trainTextEl.textContent = `训练中：${g}/${games}｜红 ${redWins} 黑 ${blackWins} 和 ${draws}`;
         trainFillEl.style.width = `${Math.round(g / games * 100)}%`;
         await sleep(20);
       }
@@ -1762,8 +2292,9 @@
     }
 
     function chooseTrainingMove(b, side, ply) {
-      const moves = generateAllLegalMoves(b, side);
+      let moves = generateAllLegalMoves(b, side);
       if (!moves.length) return null;
+      moves = filterObviousBlunders(b, moves, side);
 
       const learned = chooseLearnedMove(b, side, moves);
       if (learned && Math.random() < 0.30) return learned;
@@ -1821,6 +2352,8 @@
         learnBook[item.key][item.move] = (learnBook[item.key][item.move] || 0) + delta;
         learnBook[item.key][item.move] = Math.max(-30, Math.min(30, learnBook[item.key][item.move]));
       }
+
+      trainAiModelFromHistory(hist, winner);
     }
 
     function importTrainingText(text) {
@@ -1887,6 +2420,22 @@
 
     function mergeLearnBook(data, weight = 1.0) {
       if (!data || typeof data !== "object") return 0;
+
+      if (data.learnBook || data.aiModel) {
+        if (data.aiModel && typeof data.aiModel === "object") {
+          const base = defaultAiModel();
+          aiModel = {
+            ...base,
+            ...aiModel,
+            ...data.aiModel,
+            weights: { ...base.weights, ...aiModel.weights, ...(data.aiModel.weights || {}) },
+            policy: { ...base.policy, ...aiModel.policy, ...(data.aiModel.policy || {}) }
+          };
+          saveAiModel();
+        }
+        data = data.learnBook || {};
+      }
+
       let addedPositions = 0;
 
       for (const [posKey, bucket] of Object.entries(data)) {
@@ -1909,7 +2458,7 @@
     }
 
     function exportTrainingData() {
-      const data = JSON.stringify(learnBook, null, 2);
+      const data = JSON.stringify({ learnBook, aiModel }, null, 2);
       const blob = new Blob([data], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -1955,6 +2504,7 @@
           learnBook = Object.fromEntries(entries.slice(0, 5000));
         }
         localStorage.setItem(LEARN_KEY, JSON.stringify(learnBook));
+        saveAiModel();
       } catch {}
       updateTrainingInfo();
     }
@@ -1965,7 +2515,7 @@
 
     function updateTrainingInfo() {
       const count = Object.keys(learnBook).length;
-      trainTextEl.textContent = training ? trainTextEl.textContent : `本地训练：${count} 条经验`;
+      trainTextEl.textContent = training ? trainTextEl.textContent : `训练经验：${count}｜模型 ${aiModel.games || 0} 局`;
       if (!training) trainFillEl.style.width = `${Math.min(100, count / 20)}%`;
     }
 
@@ -2180,8 +2730,18 @@
       const attacked = isSquareAttacked(next, move.to.r, move.to.c, opposite(color));
       const defended = isSquareAttacked(next, move.to.r, move.to.c, color, true);
 
-      if (attacked && !defended) score -= baseValue[p.type] * 0.95;
-      else if (attacked) score -= baseValue[p.type] * 0.25;
+      if (attacked && !defended) score -= baseValue[p.type] * 1.20;
+      else if (attacked) score -= baseValue[p.type] * 0.34;
+
+      const landingRisk = landingSquareRisk(next, move.to.r, move.to.c, color);
+      if (landingRisk > 0) score -= landingRisk * 2.15;
+
+      if (ply === 0) {
+        const beforeThreat = bestCaptureThreat(b, opposite(color));
+        const afterThreat = bestCaptureThreat(next, opposite(color));
+        const newThreat = afterThreat - Math.max(0, beforeThreat * 0.55);
+        if (newThreat > 180) score -= newThreat * 3.4;
+      }
 
       // 根节点避免优势方主动三次重复；劣势方可以接受和棋。
       if (ply === 0 && typeof boardStateCounts === "object") {
@@ -2197,6 +2757,7 @@
 
       const learn = getLearnScoreForMove(b, color, move);
       score += learn * 160;
+      score += modelPolicyPrior(b, move, color) * 180;
 
       return score;
     }
@@ -2384,6 +2945,85 @@
       return `${m.from.r}${m.from.c}${m.to.r}${m.to.c}`;
     }
 
+
+    function formatChineseMove(b, fr, fc, tr, tc, captured = null) {
+      const p = b[fr][fc];
+      if (!p) return "";
+
+      const prefix = moveRecordPrefix(b, fr, fc, p);
+      const action = moveAction(p.color, fr, fc, tr, tc);
+      const target = moveTargetText(p, fr, fc, tr, tc);
+
+      return `${prefix}${action}${target}`;
+    }
+
+    function moveRecordPrefix(b, r, c, p) {
+      const sameFile = [];
+      for (let rr = 0; rr < ROWS; rr++) {
+        const other = b[rr][c];
+        if (other && other.color === p.color && other.type === p.type) {
+          sameFile.push({ r: rr, c });
+        }
+      }
+
+      if (sameFile.length <= 1) {
+        return `${chinesePieceName(p)}${fileText(p.color, c)}`;
+      }
+
+      sameFile.sort((a, z) => p.color === "red" ? a.r - z.r : z.r - a.r);
+      const index = sameFile.findIndex(x => x.r === r && x.c === c);
+
+      let orderText;
+      if (sameFile.length === 2) {
+        orderText = index === 0 ? "前" : "后";
+      } else if (sameFile.length === 3) {
+        orderText = ["前", "中", "后"][index] || "中";
+      } else {
+        orderText = numberText(p.color, index + 1);
+      }
+
+      return `${orderText}${chinesePieceName(p)}`;
+    }
+
+    function moveAction(color, fr, fc, tr, tc) {
+      if (fr === tr) return "平";
+      const forward = color === "red" ? tr < fr : tr > fr;
+      return forward ? "进" : "退";
+    }
+
+    function moveTargetText(p, fr, fc, tr, tc) {
+      if (fr === tr) {
+        return fileText(p.color, tc);
+      }
+
+      // 直线走子的“进/退”后面写步数；斜走子的“进/退”后面写到达路数。
+      if (["r", "c", "k", "p"].includes(p.type) && fc === tc) {
+        return numberText(p.color, Math.abs(tr - fr));
+      }
+
+      return fileText(p.color, tc);
+    }
+
+    function chinesePieceName(p) {
+      const names = {
+        red: { k: "帅", a: "仕", b: "相", n: "马", r: "车", c: "炮", p: "兵" },
+        black: { k: "将", a: "士", b: "象", n: "马", r: "车", c: "炮", p: "卒" }
+      };
+      return names[p.color][p.type];
+    }
+
+    function fileText(color, col) {
+      // 中国象棋记谱从本方右手边数起。红方：九八七六五四三二一；黑方：1 2 3 4 5 6 7 8 9。
+      const fileNo = color === "red" ? 9 - col : col + 1;
+      return numberText(color, fileNo);
+    }
+
+    function numberText(color, n) {
+      const redNums = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+      const blackNums = ["", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+      return color === "red" ? redNums[n] : blackNums[n];
+    }
+
     function coordText(r, c) {
       return `${String.fromCharCode(65 + c)}${r + 1}`;
     }
@@ -2422,32 +3062,32 @@
 
       if (gameOver) {
         if (ruleWinner) {
-          statusEl.innerHTML = `判负：${ruleReason}<br><span class="small"><span class="${ruleWinner}">${colorName(ruleWinner)}</span> 获胜。</span>`;
+          statusEl.innerHTML = `判负：${ruleReason}<br><span class="${ruleWinner}">${colorName(ruleWinner)}</span>获胜`;
           return;
         }
 
         if (drawReason) {
-          statusEl.innerHTML = `和棋：${drawReason}<br><span class="small">当前规则：长将、单方长捉判负；双方均未犯长打时，三次重复可判和。</span>`;
+          statusEl.innerHTML = `和棋<br>${drawReason}`;
           return;
         }
 
         if (lastMove && lastMove.captured && lastMove.captured.type === "k") {
           const winner = lastMove.piece.color === "red" ? "红方" : "黑方";
-          statusEl.innerHTML = `游戏结束：<span class="${lastMove.piece.color}">${winner}</span> 获胜。`;
+          statusEl.innerHTML = `游戏结束<br><span class="${lastMove.piece.color}">${winner}</span>获胜`;
           return;
         }
 
         const winner = opposite(turn);
-        statusEl.innerHTML = `${isInCheck(board, turn) ? "将死" : "困毙"}！<span class="${winner}">${winner === "red" ? "红方" : "黑方"}</span> 获胜。`;
+        statusEl.innerHTML = `${isInCheck(board, turn) ? "将死" : "困毙"}<br><span class="${winner}">${winner === "red" ? "红方" : "黑方"}</span>获胜`;
         return;
       }
 
       const modeText = modeEl.value === "ai-vs-ai"
-        ? "　AI 自战"
-        : aiColor ? `　AI 执${aiColor === "red" ? "红" : "黑"}` : "　双人对弈";
+        ? "AI 自战"
+        : aiColor ? `AI 执${aiColor === "red" ? "红" : "黑"}` : "双人对弈";
 
-      const thinking = aiThinking ? `　🤖 AI 思考中...` : "";
-      statusEl.innerHTML = `轮到：<span class="${turnClass}">${turnText}</span>${modeText}${inCheck ? "　⚠️ 正被将军" : ""}${thinking}<br><span class="small">搜索节点会在控制台显示；本地经验在浏览器，公共训练库来自仓库里的 training-data.json。</span>`;
+      const thinking = aiThinking ? " · AI 思考中" : "";
+      statusEl.innerHTML = `轮到：<span class="${turnClass}">${turnText}</span><br>${modeText}${inCheck ? " · 将军" : ""}${thinking}`;
     }
 
     function renderMoves() {
@@ -2456,7 +3096,21 @@
         return;
       }
 
-      movesEl.innerHTML = moveRecords.map((x, i) => `<div>${i + 1}. ${x}</div>`).join("");
+      const rounds = [];
+      for (let i = 0; i < moveRecords.length; i += 2) {
+        const roundNo = Math.floor(i / 2) + 1;
+        const redMove = moveRecords[i] || "";
+        const blackMove = moveRecords[i + 1] || "";
+        rounds.push(`
+          <div class="round-row">
+            <span class="round-no">${roundNo}.</span>
+            <span class="round-move red-move">${redMove}</span>
+            <span class="round-move black-move">${blackMove}</span>
+          </div>
+        `);
+      }
+
+      movesEl.innerHTML = rounds.join("");
       movesEl.scrollTop = movesEl.scrollHeight;
     }
 
