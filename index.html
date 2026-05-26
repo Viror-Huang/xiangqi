@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>中国象棋 AI Pro Max</title>
+  <title>中国象棋 AI Pro Max｜网站训练库版</title>
   <style>
     :root {
       --line: #5b2f12;
@@ -279,7 +279,7 @@
     </section>
 
     <aside class="panel">
-      <h1>中国象棋 AI Pro Max</h1>
+      <h1>中国象棋 AI Pro Max｜网站训练库版</h1>
       <div id="status" class="status"></div>
 
       <div class="settings">
@@ -311,6 +311,10 @@
         <button id="importBtn" class="secondary">导入棋谱训练</button>
         <input id="importFile" type="file" accept=".txt,.csv,.json" style="display:none" />
         <button id="clearLearn" class="danger">清空训练</button>
+        <button id="exportLearn" class="secondary">导出训练数据</button>
+        <button id="importJsonBtn" class="secondary">导入训练 JSON</button>
+        <button id="loadSiteLearn" class="secondary">加载网站训练库</button>
+        <input id="importJsonFile" type="file" accept=".json,application/json" style="display:none" />
       </div>
 
       <div class="meter">
@@ -339,6 +343,7 @@
     const MATE = 100000000;
     const LEARN_KEY = "xiangqi_ai_pro_learning_v3";
     const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v3";
+    const SITE_TRAINING_URL = "training-data.json";
 
     const boardEl = document.getElementById("board");
     const statusEl = document.getElementById("status");
@@ -351,6 +356,10 @@
     const importBtn = document.getElementById("importBtn");
     const importFileEl = document.getElementById("importFile");
     const clearLearnBtn = document.getElementById("clearLearn");
+    const exportLearnBtn = document.getElementById("exportLearn");
+    const importJsonBtn = document.getElementById("importJsonBtn");
+    const importJsonFileEl = document.getElementById("importJsonFile");
+    const loadSiteLearnBtn = document.getElementById("loadSiteLearn");
     const modeEl = document.getElementById("mode");
     const difficultyEl = document.getElementById("difficulty");
     const trainTextEl = document.getElementById("trainText");
@@ -1400,6 +1409,77 @@
       return { from: { r: fr, c: fc }, to: { r: tr, c: tc } };
     }
 
+
+    async function loadSiteTrainingData(showMessage = false) {
+      try {
+        const response = await fetch(SITE_TRAINING_URL + "?v=" + Date.now(), { cache: "no-store" });
+        if (!response.ok) throw new Error("training-data.json not found");
+        const data = await response.json();
+        const added = mergeLearnBook(data, 1.0);
+        saveLearnBook();
+        if (showMessage) alert(`已加载网站训练库：合并 ${added} 条局面经验。`);
+        return added;
+      } catch (error) {
+        if (showMessage) {
+          alert("没有加载到网站训练库。请确认 GitHub 仓库根目录已经上传 training-data.json。");
+        }
+        return 0;
+      }
+    }
+
+    function mergeLearnBook(data, weight = 1.0) {
+      if (!data || typeof data !== "object") return 0;
+      let addedPositions = 0;
+
+      for (const [posKey, bucket] of Object.entries(data)) {
+        if (!bucket || typeof bucket !== "object") continue;
+
+        if (!learnBook[posKey]) {
+          learnBook[posKey] = {};
+          addedPositions++;
+        }
+
+        for (const [move, rawValue] of Object.entries(bucket)) {
+          const value = Number(rawValue);
+          if (!Number.isFinite(value)) continue;
+          learnBook[posKey][move] = (learnBook[posKey][move] || 0) + value * weight;
+          learnBook[posKey][move] = Math.max(-40, Math.min(40, learnBook[posKey][move]));
+        }
+      }
+
+      return addedPositions;
+    }
+
+    function exportTrainingData() {
+      const data = JSON.stringify(learnBook, null, 2);
+      const blob = new Blob([data], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "training-data.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    async function importTrainingJsonFile(file) {
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const added = mergeLearnBook(data, 1.0);
+        saveLearnBook();
+        render();
+        alert(`导入成功：合并 ${added} 条局面经验。`);
+      } catch (error) {
+        alert("导入失败：请选择有效的 training-data.json 文件。");
+      } finally {
+        importJsonFileEl.value = "";
+      }
+    }
+
     function loadLearnBook() {
       try {
         return JSON.parse(localStorage.getItem(LEARN_KEY) || "{}");
@@ -1412,9 +1492,9 @@
       try {
         // 控制大小，只保留强经验
         const entries = Object.entries(learnBook);
-        if (entries.length > 2500) {
+        if (entries.length > 5000) {
           entries.sort((a, b) => maxAbsBucket(b[1]) - maxAbsBucket(a[1]));
-          learnBook = Object.fromEntries(entries.slice(0, 2500));
+          learnBook = Object.fromEntries(entries.slice(0, 5000));
         }
         localStorage.setItem(LEARN_KEY, JSON.stringify(learnBook));
       } catch {}
@@ -1887,7 +1967,7 @@
         : aiColor ? `　AI 执${aiColor === "red" ? "红" : "黑"}` : "　双人对弈";
 
       const thinking = aiThinking ? `　🤖 AI 思考中...` : "";
-      statusEl.innerHTML = `轮到：<span class="${turnClass}">${turnText}</span>${modeText}${inCheck ? "　⚠️ 正被将军" : ""}${thinking}<br><span class="small">搜索节点会在控制台显示；训练经验保存在本浏览器。</span>`;
+      statusEl.innerHTML = `轮到：<span class="${turnClass}">${turnText}</span>${modeText}${inCheck ? "　⚠️ 正被将军" : ""}${thinking}<br><span class="small">搜索节点会在控制台显示；本地经验在浏览器，公共训练库来自仓库里的 training-data.json。</span>`;
     }
 
     function renderMoves() {
@@ -1957,6 +2037,16 @@
     trainBtn.addEventListener("click", () => trainSelfPlay(20));
     trainDeepBtn.addEventListener("click", () => trainSelfPlay(100));
 
+    exportLearnBtn.addEventListener("click", exportTrainingData);
+
+    importJsonBtn.addEventListener("click", () => importJsonFileEl.click());
+
+    importJsonFileEl.addEventListener("change", event => {
+      importTrainingJsonFile(event.target.files[0]);
+    });
+
+    loadSiteLearnBtn.addEventListener("click", () => loadSiteTrainingData(true));
+
     importBtn.addEventListener("click", () => importFileEl.click());
     importFileEl.addEventListener("change", async () => {
       const file = importFileEl.files && importFileEl.files[0];
@@ -1976,9 +2066,14 @@
       render();
     });
 
-    seedBuiltInMasterBook();
-    render();
-    scheduleAiMove();
+    async function boot() {
+      seedBuiltInMasterBook();
+      await loadSiteTrainingData(false);
+      render();
+      scheduleAiMove();
+    }
+
+    boot();
   </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"45c2bf8136a245cd97f1c2e9a96c0730","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>

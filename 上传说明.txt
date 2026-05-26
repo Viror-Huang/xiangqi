@@ -1,0 +1,18 @@
+方案一：让训练数据一直在网站里
+
+第一次上传：
+1. 把 index.html 上传到 GitHub 仓库根目录，覆盖旧的 index.html。
+2. 把 training-data.json 也上传到 GitHub 仓库根目录。
+3. 等 GitHub Pages 部署完成。
+
+以后更新训练库：
+1. 打开你的网站。
+2. 多点击几次“训练 20 局”或“深度训练 100 局”。
+3. 点击“导出训练数据”，浏览器会下载新的 training-data.json。
+4. 回到 GitHub 仓库，上传新的 training-data.json，覆盖旧文件。
+5. 等 1～2 分钟，网站更新后，其他人打开网页就会自动加载这份训练库。
+
+说明：
+- localStorage 是每个浏览器自己的本地训练。
+- training-data.json 是网站公共训练库。
+- 只要替换 GitHub 里的 training-data.json，就能把你的训练成果分享给所有访客。
