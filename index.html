@@ -442,7 +442,7 @@
     const INF = 1e12;
     const MATE = 100000000;
     const LEARN_KEY = "xiangqi_ai_pro_learning_v3";
-    const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v5";
+    const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v6";
     const SITE_TRAINING_URL = "training-data.json";
     const MODEL_KEY = "xiangqi_ai_policy_value_model_v1";
 
@@ -1369,6 +1369,9 @@
         // 走完让对方一步杀，剔除
         if (findImmediateWinMove(next, enemy)) continue;
 
+        // 开局低级冒进，剔除
+        if (isOpeningOverextension(b, move, color)) continue;
+
         const check = isInCheck(next, enemy);
         const gain = target ? (baseValue[target.type] || 0) : 0;
         const risk = landingSquareRisk(next, move.to.r, move.to.c, color);
@@ -1400,6 +1403,7 @@
         score += pawnContactBonus(p, target) * 1.35;
         score += Math.max(0, staticExchangeEval(b, move, color)) * 0.75;
       }
+      if (isOpeningOverextension(b, move, color)) score -= 1800;
       if (isInCheck(next, enemy)) score += 420;
       if (createsBigThreat(next, move.to.r, move.to.c, color)) score += 220;
 
@@ -2853,6 +2857,40 @@
     }
 
 
+
+    function isOpeningOverextension(b, move, color) {
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      if (!p) return false;
+
+      const ply = moveRecords.length;
+      if (ply >= 12) return false;
+
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+
+      // 吃大子、将军、一步杀不算冒进。
+      if (target && ["r", "c", "n", "k"].includes(target.type)) return false;
+      if (isInCheck(next, enemy)) return false;
+      if (findImmediateWinMove(b, color, [move])) return false;
+
+      const forwardRows = color === "red" ? move.from.r - move.to.r : move.to.r - move.from.r;
+
+      // 开局炮直接深入 5 格以上，通常容易变成低级冒进。
+      if (p.type === "c" && forwardRows >= 5 && !target) return true;
+
+      // 开局车无吃子直接深入，也常导致送车/被追。
+      if (p.type === "r" && forwardRows >= 2 && !target) return true;
+
+      // 马过早冲入对方阵地且无保护。
+      if (p.type === "n" && hasCrossedRiver(color, move.to.r)) {
+        const risk = landingSquareRisk(next, move.to.r, move.to.c, color);
+        if (risk > 180) return true;
+      }
+
+      return false;
+    }
+
     function findUrgentCaptureMove(b, color, moves) {
       // 专门处理低级战术：白吃大子、吃危险过河兵、兵卒对冲能吃不吃。
       let best = null;
@@ -2932,6 +2970,7 @@
         const enemy = opposite(color);
 
         if (captured && captured.type === "k") return move;
+        if (isOpeningOverextension(b, move, color)) continue;
 
         const enemyMoves = generateAllLegalMoves(next, enemy);
         if (enemyMoves.length === 0) return move;
@@ -3347,37 +3386,178 @@
       trainAiModelFromHistory(hist, winner);
     }
 
-    function importTrainingText(text) {
+    function importTrainingText(text, silent = false, sourceName = "棋谱") {
       const lines = text.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
       let games = 0;
       let movesLearned = 0;
 
       for (const line of lines) {
-        let b = createInitialBoard();
-        let side = "red";
-        const tokens = line.match(/[A-Ia-i](?:10|[1-9])\s*(?:-|→|:|,)\s*[A-Ia-i](?:10|[1-9])/g) || [];
-        if (!tokens.length) continue;
-        games++;
-
-        for (let i = 0; i < tokens.length; i++) {
-          const move = parseCoordinateMove(tokens[i]);
-          if (!move) continue;
-          const legal = generateAllLegalMoves(b, side);
-          const real = legal.find(m => sameMove(m, move));
-          if (!real) break;
-          const key = learningKey(b, side);
-          const mv = moveKey(real);
-          if (!learnBook[key]) learnBook[key] = {};
-          learnBook[key][mv] = (learnBook[key][mv] || 0) + Math.max(0.4, 2.5 - i * 0.06);
-          learnBook[key][mv] = Math.max(-30, Math.min(40, learnBook[key][mv]));
-          b = applyMoveToClone(b, real);
-          side = opposite(side);
-          movesLearned++;
+        const learned = learnFromGameLine(line, 3.0);
+        if (learned.moves > 0) {
+          games++;
+          movesLearned += learned.moves;
         }
       }
 
       saveLearnBook();
-      alert(`导入完成：读取 ${games} 盘，学习 ${movesLearned} 步。\n格式示例：B8-E8 B1-C3 H10-G8`);
+      if (!silent) {
+        alert(`导入完成：读取 ${games} 盘，学习 ${movesLearned} 步。\n支持格式：A1-A2 坐标棋谱，或 炮二平五 马8进7 这种中国象棋记谱。`);
+      }
+      return { games, moves: movesLearned };
+    }
+
+    function learnFromGameLine(line, baseWeight = 2.5) {
+      let b = createInitialBoard();
+      let side = "red";
+      let movesLearned = 0;
+
+      const tokens = tokenizeGameLine(line);
+      if (!tokens.length) return { moves: 0 };
+
+      for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        let move = parseCoordinateMove(token);
+        if (!move) move = parseChineseNotationMove(b, side, token);
+        if (!move) continue;
+
+        const legal = generateAllLegalMoves(b, side);
+        const real = legal.find(m => sameMove(m, move));
+        if (!real) break;
+
+        // 明显冒进/送子不从棋谱里强化，避免脏数据污染。
+        if (isOpeningOverextension(b, real, side) || isObviousBlunder(b, real, side)) {
+          b = applyMoveToClone(b, real);
+          side = opposite(side);
+          continue;
+        }
+
+        const key = learningKey(b, side);
+        const mv = moveKey(real);
+        if (!learnBook[key]) learnBook[key] = {};
+        learnBook[key][mv] = (learnBook[key][mv] || 0) + Math.max(0.5, baseWeight - i * 0.045);
+        learnBook[key][mv] = Math.max(-30, Math.min(45, learnBook[key][mv]));
+
+        // 也训练轻量价值模型，让 AI 学“局面特征”，不只是背走法。
+        trainAiModelFromHistory([{ key, move: mv, color: side, features: extractModelFeatures(b, side) }], side);
+
+        b = applyMoveToClone(b, real);
+        side = opposite(side);
+        movesLearned++;
+      }
+
+      return { moves: movesLearned };
+    }
+
+    function tokenizeGameLine(line) {
+      return line
+        .replace(/\{[^}]*\}/g, " ")
+        .replace(/\([^)]*\)/g, " ")
+        .replace(/\[[^\]]*\]/g, " ")
+        .replace(/[，。；;|]/g, " ")
+        .replace(/\d+\s*[\.、]/g, " ")
+        .split(/\s+/)
+        .map(x => x.trim())
+        .filter(Boolean)
+        .filter(x => !/^(红|黑|先|后|胜|负|和|结果|Result)$/i.test(x));
+    }
+
+    function parseChineseNotationMove(b, color, token) {
+      token = normalizeChineseMoveToken(token);
+      if (!token || token.length < 4) return null;
+
+      const pieceChar = token.match(/[车車马馬炮砲兵卒相象仕士帅帥将將]/)?.[0];
+      if (!pieceChar) return null;
+
+      const actionMatch = token.match(/[进退平]/);
+      if (!actionMatch) return null;
+      const action = actionMatch[0];
+      const actionIndex = token.indexOf(action);
+      const targetText = token.slice(actionIndex + 1);
+      const targetNo = chineseNumberValue(targetText[0]);
+      if (!targetNo) return null;
+
+      const pieceType = chinesePieceType(pieceChar);
+      const prefix = token.slice(0, actionIndex).replace(pieceChar, "");
+      const legal = generateAllLegalMoves(b, color);
+
+      const candidates = legal.filter(m => {
+        const p = b[m.from.r][m.from.c];
+        if (!p || p.color !== color || p.type !== pieceType) return false;
+
+        const generated = formatChineseMove(b, m.from.r, m.from.c, m.to.r, m.to.c);
+        if (normalizeChineseMoveToken(generated) === token) return true;
+
+        if (!notationPrefixMatches(b, m, color, prefix)) return false;
+        if (moveAction(color, m.from.r, m.from.c, m.to.r, m.to.c) !== action) return false;
+
+        if (action === "平") {
+          return fileNoOfCol(color, m.to.c) === targetNo;
+        }
+
+        if (["r", "c", "k", "p"].includes(pieceType) && m.from.c === m.to.c) {
+          return Math.abs(m.to.r - m.from.r) === targetNo;
+        }
+
+        return fileNoOfCol(color, m.to.c) === targetNo;
+      });
+
+      if (candidates.length === 1) return candidates[0];
+
+      // 多个候选时，优先选择与程序自身记谱完全一致的。
+      const exact = candidates.find(m => normalizeChineseMoveToken(formatChineseMove(b, m.from.r, m.from.c, m.to.r, m.to.c)) === token);
+      return exact || candidates[0] || null;
+    }
+
+    function normalizeChineseMoveToken(token) {
+      return String(token || "")
+        .replace(/[１２３４５６７８９]/g, d => "１２３４５６７８９".indexOf(d) + 1)
+        .replace(/車/g, "车")
+        .replace(/馬/g, "马")
+        .replace(/砲/g, "炮")
+        .replace(/帥/g, "帅")
+        .replace(/\+/g, "进")
+        .replace(/-/g, "退")
+        .replace(/\./g, "平")
+        .replace(/\s+/g, "");
+    }
+
+    function chinesePieceType(ch) {
+      const map = { 车: "r", 马: "n", 炮: "c", 兵: "p", 卒: "p", 相: "b", 象: "b", 仕: "a", 士: "a", 帅: "k", 将: "k" };
+      return map[ch];
+    }
+
+    function chineseNumberValue(ch) {
+      const map = { 一:1, 二:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8, 九:9, "1":1, "2":2, "3":3, "4":4, "5":5, "6":6, "7":7, "8":8, "9":9 };
+      return map[ch] || 0;
+    }
+
+    function fileNoOfCol(color, col) {
+      return color === "red" ? 9 - col : col + 1;
+    }
+
+    function notationPrefixMatches(b, move, color, prefix) {
+      const p = b[move.from.r][move.from.c];
+      if (!p) return false;
+      prefix = prefix || "";
+
+      if (!prefix) return true;
+
+      const file = chineseNumberValue(prefix[prefix.length - 1]);
+      if (file) return fileNoOfCol(color, move.from.c) === file;
+
+      const sameFile = [];
+      for (let rr = 0; rr < ROWS; rr++) {
+        const other = b[rr][move.from.c];
+        if (other && other.color === color && other.type === p.type) sameFile.push({ r: rr, c: move.from.c });
+      }
+      sameFile.sort((a, z) => color === "red" ? a.r - z.r : z.r - a.r);
+      const index = sameFile.findIndex(x => x.r === move.from.r && x.c === move.from.c);
+
+      if (prefix.includes("前")) return index === 0;
+      if (prefix.includes("后")) return index === sameFile.length - 1;
+      if (prefix.includes("中")) return index === Math.floor(sameFile.length / 2);
+
+      return true;
     }
 
     function parseCoordinateMove(token) {
@@ -3398,8 +3578,18 @@
         if (!response.ok) throw new Error("training-data.json not found");
         const data = await response.json();
         const added = mergeLearnBook(data, 1.0);
+
+        let pgnMoves = 0;
+        try {
+          const masterResp = await fetch("master-games.txt?v=" + Date.now(), { cache: "no-store" });
+          if (masterResp.ok) {
+            const masterText = await masterResp.text();
+            pgnMoves = importTrainingText(masterText, true, "master-games.txt").moves;
+          }
+        } catch {}
+
         saveLearnBook();
-        if (showMessage) alert(`已加载网站训练库：合并 ${added} 条局面经验。`);
+        if (showMessage) alert(`已加载网站训练库：合并 ${added} 条局面经验，学习大师棋谱 ${pgnMoves} 步。`);
         return added;
       } catch (error) {
         if (showMessage) {
@@ -3711,6 +3901,7 @@
         score += dangerousPawnBonus(target, move.to.r, move.to.c, color) * 18;
         score += pawnContactBonus(p, target) * 16;
       } else {
+        if (isOpeningOverextension(b, move, color)) score -= 45000;
         if (killerMoves[ply] && killerMoves[ply].some(k => sameMove(k, move))) score += 10000;
         score += historyHeuristic.get(moveKey(move)) || 0;
       }
