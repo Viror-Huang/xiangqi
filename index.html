@@ -1026,6 +1026,9 @@
       const winNow = findImmediateWinMove(b, color, moves);
       if (winNow) return winNow;
 
+      const urgentCapture = findUrgentCaptureMove(b, color, moves);
+      if (urgentCapture) return urgentCapture;
+
       const safeMoves = moves.filter(m => !isFastObviousBlunder(b, m, color));
       if (safeMoves.length) moves = safeMoves;
 
@@ -1391,7 +1394,12 @@
       const enemy = opposite(color);
       let score = 0;
 
-      if (target) score += (baseValue[target.type] || 0) * 1.35 - (baseValue[p.type] || 0) * 0.08;
+      if (target) {
+        score += (baseValue[target.type] || 0) * 1.35 - (baseValue[p.type] || 0) * 0.08;
+        score += dangerousPawnBonus(target, move.to.r, move.to.c, color) * 1.25;
+        score += pawnContactBonus(p, target) * 1.35;
+        score += Math.max(0, staticExchangeEval(b, move, color)) * 0.75;
+      }
       if (isInCheck(next, enemy)) score += 420;
       if (createsBigThreat(next, move.to.r, move.to.c, color)) score += 220;
 
@@ -1440,6 +1448,10 @@
       // 先找自己的一步杀/一步胜。这个优先级最高。
       const immediateWin = findImmediateWinMove(b, aiColor, moves);
       if (immediateWin) return immediateWin;
+
+      // 低级错误修复：如果对方有危险过河兵/白送子，先吃掉。
+      const urgentCapture = findUrgentCaptureMove(b, aiColor, moves);
+      if (urgentCapture) return urgentCapture;
 
       // 极速安全筛选：只做必要的防一步杀、防明显送大子，避免每步卡顿。
       moves = filterFastRootBlunders(b, moves, aiColor);
@@ -2006,11 +2018,42 @@
     }
 
 
+
+    function enemyDangerousPawnPressure(b, color) {
+      const enemy = opposite(color);
+      let penalty = 0;
+      const king = findKing(b, color);
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const p = b[r][c];
+          if (!p || p.color !== enemy || p.type !== "p") continue;
+
+          if (hasCrossedRiver(enemy, r)) penalty += 45;
+          if ([3, 4, 5].includes(c)) penalty += 22;
+
+          if (king) {
+            const dist = Math.abs(r - king.r) + Math.abs(c - king.c);
+            penalty += Math.max(0, 85 - dist * 12);
+          }
+
+          // 图中这种：红兵连进到黑方河界附近，必须重视。
+          if (color === "black" && enemy === "red" && r <= 4) penalty += 60;
+          if (color === "red" && enemy === "black" && r >= 5) penalty += 60;
+        }
+      }
+
+      return penalty;
+    }
+
     function advancedStructureBonus(b, color, phase) {
       let score = 0;
       const enemy = opposite(color);
       const enemyKing = findKing(b, enemy);
       const ownKing = findKing(b, color);
+
+      // 对方危险过河兵必须惩罚，避免 AI 无视兵卒推进。
+      score -= enemyDangerousPawnPressure(b, color);
 
       // 兵卒靠近九宫，尤其有车炮马配合时价值更高。
       for (let r = 0; r < ROWS; r++) {
@@ -2809,6 +2852,74 @@
       return 1800;
     }
 
+
+    function findUrgentCaptureMove(b, color, moves) {
+      // 专门处理低级战术：白吃大子、吃危险过河兵、兵卒对冲能吃不吃。
+      let best = null;
+      let bestScore = 0;
+
+      for (const move of moves) {
+        const moving = b[move.from.r][move.from.c];
+        const captured = b[move.to.r][move.to.c];
+        if (!moving || !captured || captured.type === "k") continue;
+
+        const next = applyMoveToClone(b, move);
+        const enemy = opposite(color);
+
+        // 走完让对方一步杀，不算好吃子。
+        if (findImmediateWinMove(next, enemy)) continue;
+
+        const gain = captureStaticGain(b, move, color);
+        const see = staticExchangeEval(b, move, color);
+        const pawnDanger = dangerousPawnBonus(captured, move.to.r, move.to.c, color);
+        const contact = pawnContactBonus(moving, captured);
+        const bigPiece = ["r", "c", "n"].includes(captured.type) ? 420 : 0;
+        const safe = landingSquareRisk(next, move.to.r, move.to.c, color) < 260 || see >= -80;
+
+        let score = gain + Math.max(0, see) * 0.45 + pawnDanger + contact + bigPiece;
+        if (!safe) score -= 260;
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = move;
+        }
+      }
+
+      // 分数门槛不要太高：图中这种“卒吃过河兵”必须能触发。
+      return bestScore >= 240 ? best : null;
+    }
+
+    function dangerousPawnBonus(p, r, c, myColor) {
+      if (!p || p.type !== "p") return 0;
+
+      let bonus = 0;
+      const enemyColor = p.color;
+
+      if (hasCrossedRiver(enemyColor, r)) bonus += 190;
+
+      // 敌兵越靠近我方九宫越危险。
+      const myKing = findKing(board, myColor);
+      if (myKing) {
+        const dist = Math.abs(r - myKing.r) + Math.abs(c - myKing.c);
+        bonus += Math.max(0, 180 - dist * 24);
+      }
+
+      // 中路、肋道过河兵威胁很大。
+      if ([3, 4, 5].includes(c)) bonus += 90;
+
+      // 如果兵已经压到我方半场深处，必须优先处理。
+      if (myColor === "black" && p.color === "red" && r <= 4) bonus += 120;
+      if (myColor === "red" && p.color === "black" && r >= 5) bonus += 120;
+
+      return bonus;
+    }
+
+    function pawnContactBonus(moving, captured) {
+      if (!moving || !captured) return 0;
+      if (moving.type === "p" && captured.type === "p") return 260;
+      return 0;
+    }
+
     function findImmediateTacticalMove(b, color, moves) {
       // 先找一步杀、一步困毙、明显白吃大子的机会，避免开局库或经验表错过战术。
       let best = null;
@@ -2826,7 +2937,9 @@
         if (enemyMoves.length === 0) return move;
 
         if (captured) {
-          const gain = captureStaticGain(b, move, color);
+          const gain = captureStaticGain(b, move, color)
+            + dangerousPawnBonus(captured, move.to.r, move.to.c, color)
+            + pawnContactBonus(moving, captured);
           if (gain > bestGain) {
             bestGain = gain;
             best = move;
@@ -2840,7 +2953,7 @@
         }
       }
 
-      return bestGain >= 420 ? best : null;
+      return bestGain >= 240 ? best : null;
     }
 
     function captureStaticGain(b, move, color) {
@@ -2855,6 +2968,8 @@
       const lowestEnemy = lowestAttackerValue(next, move.to.r, move.to.c, enemy);
 
       let gain = baseValue[captured.type] - baseValue[moving.type] * 0.06;
+      gain += dangerousPawnBonus(captured, move.to.r, move.to.c, color);
+      gain += pawnContactBonus(moving, captured);
 
       if (attacked) {
         const recaptureCost = Number.isFinite(lowestEnemy)
@@ -3155,6 +3270,9 @@
       if (!moves.length) return null;
       moves = filterFastRootBlunders(b, moves, side);
       moves = limitRootCandidates(b, moves, side, 12);
+
+      const urgentCapture = findUrgentCaptureMove(b, side, moves);
+      if (urgentCapture) return urgentCapture;
 
       const learned = chooseLearnedMove(b, side, moves);
       if (learned && Math.random() < 0.22) return learned;
@@ -3588,8 +3706,10 @@
       let score = 0;
 
       if (target) {
-        // MVV-LVA：先吃大子，用小子吃大子更优
+        // MVV-LVA：先吃大子，用小子吃大子更优；过河兵、兵卒对冲也要重视。
         score += baseValue[target.type] * 24 - baseValue[p.type] * 0.7;
+        score += dangerousPawnBonus(target, move.to.r, move.to.c, color) * 18;
+        score += pawnContactBonus(p, target) * 16;
       } else {
         if (killerMoves[ply] && killerMoves[ply].some(k => sameMove(k, move))) score += 10000;
         score += historyHeuristic.get(moveKey(move)) || 0;
