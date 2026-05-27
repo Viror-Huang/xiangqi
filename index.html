@@ -441,10 +441,10 @@
     const COLS = 9;
     const INF = 1e12;
     const MATE = 100000000;
-    const LEARN_KEY = "xiangqi_ai_pro_learning_v3";
-    const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v6";
+    const LEARN_KEY = "xiangqi_ai_pro_learning_v4";
+    const SEED_KEY = "xiangqi_ai_pro_seeded_master_book_v7";
     const SITE_TRAINING_URL = "training-data.json";
-    const MODEL_KEY = "xiangqi_ai_policy_value_model_v1";
+    const MODEL_KEY = "xiangqi_ai_policy_value_model_v2";
 
     const boardEl = document.getElementById("board");
     const statusEl = document.getElementById("status");
@@ -1108,6 +1108,8 @@
       const enemy = opposite(color);
       let score = 0;
 
+      if (isBadCannonHorseCapture(b, move, color)) score -= 6000;
+
       if (target) score += captureStaticGain(b, move, color) * 1.25;
       if (isInCheck(next, enemy)) score += 380;
       if (createsBigThreat(next, move.to.r, move.to.c, color)) score += 220;
@@ -1270,6 +1272,8 @@
       const enemy = opposite(color);
       let score = 0;
 
+      if (isBadCannonHorseCapture(b, move, color)) score -= 5.0;
+
       // 这部分相当于 policy network 的手工特征先验。
       score += modelPolicyPrior(b, move, color) * 2.4;
       score += masterStyleMoveBonus(b, move, color) * 1.4;
@@ -1369,7 +1373,8 @@
         // 走完让对方一步杀，剔除
         if (findImmediateWinMove(next, enemy)) continue;
 
-        // 开局低级冒进，剔除
+        // 开局低级冒进，剔除。尤其禁止“炮打底线马后马上被反吃”的坏交换。
+        if (isBadCannonHorseCapture(b, move, color)) continue;
         if (isOpeningOverextension(b, move, color)) continue;
 
         const check = isInCheck(next, enemy);
@@ -1396,6 +1401,8 @@
       const next = applyMoveToClone(b, move);
       const enemy = opposite(color);
       let score = 0;
+
+      if (isBadCannonHorseCapture(b, move, color)) score -= 6000;
 
       if (target) {
         score += (baseValue[target.type] || 0) * 1.35 - (baseValue[p.type] || 0) * 0.08;
@@ -2858,18 +2865,66 @@
 
 
 
+    function isBadCannonHorseCapture(b, move, color) {
+      // 专门修正“炮打马”坏习惯：
+      // 开局/中前盘用炮远程吃对方底线马，如果落点立刻被车、帅/将或其它子反吃，
+      // 且没有形成将杀/强制攻势，就不要把它当成好战术。
+      const p = b[move.from.r][move.from.c];
+      const target = b[move.to.r][move.to.c];
+      if (!p || !target) return false;
+      if (p.type !== "c" || target.type !== "n" || target.color === color) return false;
+
+      const next = applyMoveToClone(b, move);
+      const enemy = opposite(color);
+
+      // 吃将、一步杀、强制将军，不按坏招处理。
+      if (target.type === "k") return false;
+      if (findImmediateWinMove(b, color, [move])) return false;
+
+      const givesCheck = isInCheck(next, enemy);
+      if (givesCheck) {
+        const replies = generateAllLegalMoves(next, enemy);
+        if (replies.length <= 2) return false;
+      }
+
+      const attacked = isSquareAttacked(next, move.to.r, move.to.c, enemy);
+      if (!attacked) return false;
+
+      const defended = isSquareAttacked(next, move.to.r, move.to.c, color, true);
+      const see = staticExchangeEval(b, move, color);
+      const risk = landingSquareRisk(next, move.to.r, move.to.c, color);
+      const homeRank = target.color === "red" ? 9 : 0;
+      const homeHorse = move.to.r === homeRank && (move.to.c === 1 || move.to.c === 7);
+      const deepRaid = target.color === "red" ? move.to.r >= 8 : move.to.r <= 1;
+      const longLeap = Math.abs(move.to.r - move.from.r) + Math.abs(move.to.c - move.from.c) >= 5;
+      const hasFollowUp = createsBigThreat(next, move.to.r, move.to.c, color);
+
+      // 典型坏形：黑炮/红炮从本方炮位一口气打到底线马，马上被边车/将帅吃回。
+      if (moveRecords.length < 36 && homeHorse && longLeap && see <= 180) return true;
+
+      // 中前盘也限制：深入敌阵吃马后被攻击，且没有后续大威胁。
+      if (moveRecords.length < 28 && deepRaid && longLeap && !hasFollowUp && see <= 120) return true;
+
+      // 更通用的 SEE 规则：炮吃马后落点无根或风险过高，判为坏交换。
+      if (!defended && see < -60) return true;
+      if (!hasFollowUp && risk >= 220 && see < 140) return true;
+
+      return false;
+    }
+
     function isOpeningOverextension(b, move, color) {
       const p = b[move.from.r][move.from.c];
       const target = b[move.to.r][move.to.c];
       if (!p) return false;
 
       const ply = moveRecords.length;
+      if (isBadCannonHorseCapture(b, move, color)) return true;
       if (ply >= 12) return false;
 
       const next = applyMoveToClone(b, move);
       const enemy = opposite(color);
 
-      // 吃大子、将军、一步杀不算冒进。
+      // 吃大子通常不算冒进，但“炮打底线马后马上被反吃”属于例外。
       if (target && ["r", "c", "n", "k"].includes(target.type)) return false;
       if (isInCheck(next, enemy)) return false;
       if (findImmediateWinMove(b, color, [move])) return false;
@@ -2900,6 +2955,7 @@
         const moving = b[move.from.r][move.from.c];
         const captured = b[move.to.r][move.to.c];
         if (!moving || !captured || captured.type === "k") continue;
+        if (isBadCannonHorseCapture(b, move, color)) continue;
 
         const next = applyMoveToClone(b, move);
         const enemy = opposite(color);
@@ -2970,6 +3026,7 @@
         const enemy = opposite(color);
 
         if (captured && captured.type === "k") return move;
+        if (isBadCannonHorseCapture(b, move, color)) continue;
         if (isOpeningOverextension(b, move, color)) continue;
 
         const enemyMoves = generateAllLegalMoves(next, enemy);
@@ -3009,6 +3066,8 @@
       let gain = baseValue[captured.type] - baseValue[moving.type] * 0.06;
       gain += dangerousPawnBonus(captured, move.to.r, move.to.c, color);
       gain += pawnContactBonus(moving, captured);
+
+      if (isBadCannonHorseCapture(b, move, color)) gain -= 900;
 
       if (attacked) {
         const recaptureCost = Number.isFinite(lowestEnemy)
@@ -3895,6 +3954,8 @@
       const target = b[move.to.r][move.to.c];
       let score = 0;
 
+      if (isBadCannonHorseCapture(b, move, color)) score -= 1000000;
+
       if (target) {
         // MVV-LVA：先吃大子，用小子吃大子更优；过河兵、兵卒对冲也要重视。
         score += baseValue[target.type] * 24 - baseValue[p.type] * 0.7;
@@ -4433,6 +4494,8 @@
 
     boot();
   </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"45c2bf8136a245cd97f1c2e9a96c0730","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"45c2bf8136a245cd97f1c2e9a96c0730","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
